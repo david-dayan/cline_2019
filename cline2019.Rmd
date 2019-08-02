@@ -1,0 +1,1844 @@
+---
+title: "Cline 2019"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+    toc: true
+---
+
+```{r packages, message=FALSE, warning=FALSE, include=FALSE}
+require(knitr)
+require(ggplot2)
+require(DiagrammeR)
+require(dplyr)
+require(plotly)
+```
+
+
+__Summary:__  
+Analysis log for clinal fundulus project
+
+## Analysis Outline  
+
+```{r}
+
+grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+      tab6 [label = '@@6']
+      tab7 [label = '@@7']
+      tab8 [label = '@@8']
+
+      # edge definitions with the node IDs
+      tab1 -> tab2 -> tab3 -> tab4 -> tab5 -> tab6 -> tab7
+      tab6 -> tab8
+      }
+
+      [1]: 'library prep (Elshire GBS)'
+      [2]: 'sequencing (illumina hiseq2000)'
+      [3]: 'qc checks and datawrangling (fastqc and bash)'
+      [4]: 'demultiplex and read filtering (stacks: process_radtags)'
+      [5]: 'read mapping (bwa_mem)'
+      [6]: 'genotype likelihoods (ANGSD)'
+      [7]: 'demography and population structure'
+      [8]: 'selection'
+      
+      ")
+
+
+```
+
+
+## Data description and QC
+
+### sequence data 
+
+The clinal dataset is composed of 9 lanes of HiSeq2500 run in SE100. These reads include 1478 individuals from 5 separate experiments plus and additional set of lanes used for undersampled regions (CT, NC, SC and ME). 
+
+__Lane names:__
+
+H7T6MADXX_1
+H7T6MADXX_2
+H9AREADXX_1
+H9AREADXX_2
+H9CWFADXX_1
+H9WYGADXX_1
+H9WYGADXX_2
+HMMKLADXX_1
+HMMKLADXX_2
+
+__Samples__
+```{r}
+sites<-read.table("./sites/sites.txt", header = T, sep = "\t")
+kable(sites)
+```
+
+
+#### QC reports
+
+```{bash, eval = FALSE}
+
+#!/bin/bash
+
+# set the number of nodes
+#SBATCH --nodes=1
+
+# set the number of cpus
+#SBATCH --cpus-per-task=6
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-02:00:00
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=fastqc
+
+# set name of output file
+#SBATCH --output=fastqc.out
+
+# mail alert at start, end and abortion of execution
+#SBATCH --mail-type=ALL
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+files="H7T6MADXX_1
+H7T6MADXX_2
+H9AREADXX_1
+H9AREADXX_2
+H9CWFADXX_1
+H9WYGADXX_1
+H9WYGADXX_2
+HMMKLADXX_1
+HMMKLADXX_2
+"
+
+for file in $files
+do
+/home/jgibbons/SOFTWARE/FastQC/fastqc -t 4 /home/ddayan/fundulus/seqdata/${file}_fastq.gz -o /home/ddayan/fundulus/seqdata/fastqc
+
+done
+
+
+```
+
+fastqc looks good
+
+
+## Demultiplex and Read Filtering
+
+We will use ANGSD to create population level allele frequency estimates rather than call indiviudal genotypes. The input files for ANGSD of indivudal level BAM files. Therefore the first step after QC check is to demultiplex, remove low quality reads and trim adapter and barcode sequences. Ths is accomplished with the process_radtags program from stacks v2.3.
+
+### generate barcodes
+
+Barcode keys (files used to demultiplex sequence data) are a bit complex given that some fish are sequenced twice and stacks requires each lane be run separately through process radtags. The solution is to give duplicate fish a unique ID suffix, but with a shared prefix, then cleaned demultiplexed reads from each fish in each lane are combined with their additional reads using prefix matching.
+
+make new fish_ids, based on only population and library prep id, then mark duplicates (duplicate fish_ids occur because some individual fish are sequenced twice i.e. in different lanes)
+
+```{r, eval = F}
+barcodes<-read.table("./snp_calling/barcode_keys/cline_barcode_key.txt", sep = "\t", header = T)
+tmp<-paste(barcodes$Pop , "_", barcodes$LibraryPrepID, sep = "")
+barcodes$fish_id<-make.names(tmp, unique = TRUE)
+write.csv(barcodes, row.names = FALSE, file = "./snp_calling/barcode_keys/cline_barcode_key.csv", quote = FALSE)
+```
+
+
+used python script on hand for slightly different format: create a unique single variable for sequencing lane (i.e. colbind flowcell and lane with a _) then run python script below
+
+```{python barcode_splitter, python.reticulate = FALSE, eval = FALSE}
+
+""" The input file has four columns, this script takes writes columns 2 and 3 (barcode and individual) to a new file based on the value of column 4."""
+
+import csv
+
+with open('./snp_calling/barcode_keys/cline_barcode_key.csv') as fin:    
+    csvin = csv.DictReader(fin)
+    # Category -> open file lookup
+    outputs = {}
+    for row in csvin:
+        cat = row['Flowcell_Lane']
+        # Open a new file and write the header
+        if cat not in outputs:
+            fout = open('./snp_calling/barcode_keys/{}_key.csv'.format(cat), 'w')
+            dw = csv.DictWriter(fout, fieldnames=csvin.fieldnames)
+            dw.writeheader()
+            outputs[cat] = fout, dw
+        # Always write the row
+        outputs[cat][1].writerow(row)
+    # Close all the files
+    for fout, _ in outputs.values():
+        fout.close()
+
+```
+
+oops, only meant to keep barcode and sample id and need to write to tab delimited file
+
+```{bash, eval = FALSE}
+
+for i in ./snp_calling/barcode_keys/*csv
+do
+  cut -d "," -f 2,10 $i > ${i%.csv}.tmp
+done
+
+
+for i in ./snp_calling/barcode_keys/*tmp
+do
+    tr "," "\\t" < $i > ${i%.tmp}_barcodes.txt
+done
+
+
+```
+
+clean up directory
+
+```{bash, eval = FALSE}
+rm ./snp_calling/barcode_keys/*.tmp
+rm ./snp_calling/barcode_keys/*[12]_key.csv
+```
+
+remove first line from all files
+```{bash, eval = FALSE}
+sed -i -e "1d" ./meta_data/*_barcodes.txt
+```
+
+
+### process_radtags
+
+Here we clean and demulitplex the reads. 
+
+__process radtags options:__  
+
+-f single end  
+-c remove any read with an uncalled base  
+-q remove any read with low quality  
+-r rescue barcodes  
+--inline-null barcodes inline  
+-e aseI  
+--adapter-1 trim adapter sequence (used AGATCGGAAGAGCCGTTCAGCAGGAATGCCGAGACCGATCTCG (common adapter from elshire))  
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set the number of nodes
+#SBATCH --nodes=1
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of output file
+#SBATCH --output=library_%a_process_radtags.out
+
+# mail alert at start, end and abortion of execution
+#SBATCH --mail-type=ALL
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+
+source /opt/stacks-2.3/bin/source_me
+/opt/stacks-2.3/bin/process_radtags -f ./seqdata/HMMKLADXX_2_fastq.gz -b ./meta_data/HMMKLADXX_2_key_barcodes.txt -o ./cleaned_tags -e aseI --inline-null -c -q -r --adapter-1 AGATCGGAAGAGCCGTTCAGCAGGAATGCCGAGACCGATCTCG  &> ./cleaned_tags/pr_library_HMMKLADXX_2.oe
+```
+
+
+__Summary of process radtags:__  
+
+A summary of number of reads for each lane is in the code chunk below
+
+```{r, eval = FALSE}
+H7T6MADXX_1  
+162739994 total sequences   
+ 13628228 reads contained adapter sequence (8.4%)  
+   312933 barcode not found drops (0.2%)  
+   828040 low quality read drops (0.5%)  
+ 14062227 RAD cutsite not found drops (8.6%)  
+133908566 retained reads (82.3%)  
+  
+H7T6MADXX_2  
+151505038 total sequences  
+ 13951706 reads contained adapter sequence (9.2%)  
+   132166 barcode not found drops (0.1%)  
+   584797 low quality read drops (0.4%)  
+  8662501 RAD cutsite not found drops (5.7%)  
+128173868 retained reads (84.6%)  
+  
+H9AREADXX_1_fastq.gz  
+148867111 total sequences   
+  4339944 reads contained adapter sequence (2.9%)  
+   306024 barcode not found drops (0.2%)  
+   305700 low quality read drops (0.2%)  
+  5881380 RAD cutsite not found drops (4.0%)  
+138034063 retained reads (92.7%)  
+  
+H9AREADXX_2_fastq.gz  
+122597494 total sequences  
+   720840 reads contained adapter sequence (0.6%)  
+   185795 barcode not found drops (0.2%)  
+   198200 low quality read drops (0.2%)  
+  8394213 RAD cutsite not found drops (6.8%)  
+113098446 retained reads (92.3%)  
+  
+H9CWFADXX_1  
+110486132 total sequences  
+ 13263006 reads contained adapter sequence (12.0%)  
+    98479 barcode not found drops (0.1%)  
+   775153 low quality read drops (0.7%)  
+  4943084 RAD cutsite not found drops (4.5%)  
+ 91406410 retained reads (82.7%)  
+  
+H9WYGADXX_1  
+138847370 total sequences  
+  3202776 reads contained adapter sequence (2.3%)  
+   846988 barcode not found drops (0.6%)  
+   267348 low quality read drops (0.2%)  
+  3683206 RAD cutsite not found drops (2.7%)  
+130847052 retained reads (94.2%)  
+  
+H9WYGADXX_2  
+159871680 total sequences  
+  5477072 reads contained adapter sequence (3.4%)  
+  1301582 barcode not found drops (0.8%)  
+   294833 low quality read drops (0.2%)  
+  6884903 RAD cutsite not found drops (4.3%)  
+145913290 retained reads (91.3%)  
+  
+HMMKLADXX_1  
+147179868 total sequences  
+  6490480 reads contained adapter sequence (4.4%)  
+    82644 barcode not found drops (0.1%)  
+   940503 low quality read drops (0.6%)  
+ 10192934 RAD cutsite not found drops (6.9%)  
+129473307 retained reads (88.0%)  
+  
+HMMKLADXX_2  
+149288526 total sequences  
+  6056602 reads contained adapter sequence (4.1%)  
+    71084 barcode not found drops (0.0%)  
+  1064401 low quality read drops (0.7%)  
+ 12505196 RAD cutsite not found drops (8.4%)  
+129591243 retained reads (86.8%)  
+```
+
+**Sum of all lanes**  
+1,291,383,213 total sequences  
+67,130,654    reads contained adapter sequence (5.2%)  
+3,337,695     barcode not found drops (0.3%)  
+5,258,975     low quality read drops (0.4%)  
+75,209,644    RAD cutsite not found drops (5.8%)  
+1,140,446,245 retained reads (88.3%)  
+  
+
+**combine duplicate cleaned tags**  
+
+Here we concatenate fastq files from fish with reads across multiple lanes
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set the number of nodes
+#SBATCH --nodes=1
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of output file
+#SBATCH --output=
+
+# mail alert at start, end and abortion of execution
+#SBATCH --mail-type=NONE
+
+prefixes="BP_406
+BP_407
+BP_408
+BP_409
+BP_410
+BP_436
+BP_437
+BP_438
+BP_439
+BP_440
+BP_466
+BP_467
+BP_468
+BP_469
+BP_470
+BP_496
+BP_497
+BP_498
+BP_499
+BP_500
+BP_526
+BP_527
+BP_528
+BP_529
+BP_530
+BP_556
+BP_557
+BP_558
+BP_559
+BP_560
+BP_586
+BP_587
+BP_588
+BP_589
+BP_590
+BP_616
+BP_617
+BP_618
+BP_619
+BP_620
+BP_646
+BP_647
+BP_648
+BP_649
+BP_650
+BP_676
+BP_677
+BP_678
+BP_679
+BP_680
+Hb_401
+Hb_402
+Hb_403
+Hb_404
+Hb_405
+Hb_432
+Hb_433
+Hb_434
+Hb_463
+Hb_464
+Hb_465
+Hb_491
+Hb_492
+Hb_493
+Hb_495
+Hb_521
+Hb_522
+Hb_523
+Hb_524
+Hb_525
+Hb_552
+Hb_555
+Hb_581
+Hb_582
+Hb_583
+Hb_584
+Hb_585
+Hb_612
+Hb_613
+Hb_615
+Hb_641
+Hb_645
+Hb_671
+Hb_672
+Hb_673
+Hb_674
+Hb_675
+Mg_416
+Mg_417
+Mg_418
+Mg_419
+Mg_420
+Mg_446
+Mg_447
+Mg_448
+Mg_449
+Mg_450
+Mg_476
+Mg_478
+Mg_479
+Mg_480
+Mg_508
+Mg_509
+Mg_536
+Mg_537
+Mg_539
+Mg_540
+Mg_567
+Mg_568
+Mg_570
+Mg_596
+Mg_597
+Mg_598
+Mg_599
+Mg_627
+Mg_628
+Mg_629
+Mg_630
+Mg_658
+Mg_660
+Mg_685
+Mg_686
+Mg_687
+Mg_688
+OC_421
+OC_422
+OC_423
+OC_424
+OC_425
+OC_451
+OC_452
+OC_453
+OC_454
+OC_455
+OC_481
+OC_482
+OC_483
+OC_484
+OC_485
+OC_511
+OC_512
+OC_513
+OC_514
+OC_515
+OC_541
+OC_542
+OC_543
+OC_544
+OC_545
+OC_571
+OC_572
+OC_573
+OC_574
+OC_575
+OC_601
+OC_602
+OC_603
+OC_604
+OC_605
+OC_631
+OC_632
+OC_633
+OC_634
+OC_635
+OC_661
+OC_662
+OC_663
+OC_664
+OC_665
+OC_689
+OC_690
+RB_427
+RB_428
+RB_430
+RB_456
+RB_457
+RB_458
+RB_459
+RB_460
+RB_487
+RB_488
+RB_489
+RB_490
+RB_516
+RB_519
+RB_546
+RB_547
+RB_548
+RB_549
+RB_550
+RB_576
+RB_577
+RB_579
+RB_580
+RB_606
+RB_607
+RB_608
+RB_610
+RB_636
+RB_637
+RB_638
+RB_639
+RB_640
+RB_668
+RB_669
+RB_670
+RB_691
+RB_692
+RB_693
+RB_694
+RB_695
+SR_411
+SR_412
+SR_413
+SR_414
+SR_415
+SR_441
+SR_442
+SR_443
+SR_445
+SR_471
+SR_472
+SR_473
+SR_474
+SR_475
+SR_501
+SR_502
+SR_504
+SR_531
+SR_532
+SR_534
+SR_535
+SR_562
+SR_564
+SR_565
+SR_591
+SR_594
+SR_595
+SR_622
+SR_624
+SR_625
+SR_651
+SR_652
+SR_653
+SR_655
+SR_682
+SR_683
+SR_684
+SH_2135
+MG_2136
+RB_2137
+RB_2138
+SH_2139
+MG_2140
+MG_2141
+MG_2142
+SH_2143
+SH_2144
+MG_2145
+RB_2146
+MG_2147
+SH_2148
+RB_2149
+MG_2150
+RB_2151
+RB_2152
+SH_2153
+SH_2154
+RB_2155
+SH_2156
+SH_2157
+MG_2158
+MG_2159
+SH_2160
+MG_2161
+MG_2162
+SH_2163
+RB_2164
+RB_2165
+SH_2166
+SH_2167
+MG_2168
+MG_2169
+MG_2170
+SH_2171
+RB_2172
+SH_2173
+RB_2174
+F_5001
+NBH_5002
+P_5003
+SLC_5004
+Syc_5005
+H_5006
+M_5007
+F_5008
+NBH_5009
+P_5010
+SLC_5011
+Syc_5012
+M_5013
+F_5014
+NBH_5015
+P_5016
+SLC_5017
+Syc_5018
+H_5019
+M_5020
+F_5021
+NBH_5022
+P_5023
+SLC_5024
+H_5025
+M_5026
+F_5027
+NBH_5028
+P_5029
+SLC_5030
+Syc_5031
+H_5032
+M_5033
+F_5034
+NBH_5035
+P_5036
+Syc_5037
+H_5038
+M_5039
+F_5040
+NBH_5041
+P_5042
+SLC_5043
+Syc_5044
+H_5045
+M_5046
+F_5047
+NBH_5048
+SLC_5049
+Syc_5050
+H_5051
+M_5052
+F_5053
+NBH_5054
+P_5055
+SLC_5056
+Syc_5057
+H_5058
+M_5059
+F_5060
+P_5061
+SLC_5062
+Syc_5063
+H_5064
+M_5065
+F_5066
+NBH_5067
+P_5068
+SLC_5069
+Syc_5070
+H_5071
+M_5072
+NBH_5073
+P_5074
+SLC_5075
+Syc_5076
+H_5077
+M_5078
+F_5079
+NBH_5080
+P_5081
+SLC_5082
+Syc_5083
+H_5084
+F_5085
+NBH_5086
+P_5087
+SLC_5088
+Syc_5089
+H_5090
+M_5091
+F_5092
+NBH_5093
+P_5094
+SLC_5095
+Syc_5096
+P_5097
+SLC_5098
+Syc_5099
+H_5100
+M_5101
+F_5102
+NBH_5103
+P_5104
+SLC_5105
+Syc_5106
+H_5107
+M_5108
+NBH_5109
+P_5110
+SLC_5111
+Syc_5112
+H_5113
+M_5114
+F_5115
+NBH_5116
+P_5117
+SLC_5118
+Syc_5119
+H_5120
+F_5121
+NBH_5122
+P_5123
+SLC_5124
+Syc_5125
+H_5126
+M_5127
+F_5128
+NBH_5129
+P_5130
+SLC_5131
+Syc_5132
+M_5133
+F_5134
+NBH_5135
+P_5136
+SLC_5137
+Syc_5138
+H_5139
+M_5140
+F_5141
+NBH_5142
+P_5143
+SLC_5144
+H_5145
+M_5146
+F_5147
+NBH_5148
+P_5149
+SLC_5150
+Syc_5151
+H_5152
+M_5153
+F_5154
+NBH_5155
+P_5156
+Syc_5157
+H_5158
+M_5159
+F_5160
+NBH_5161
+P_5162
+SLC_5163
+Syc_5164
+H_5165
+M_5166
+F_5167
+NBH_5168
+SLC_5169
+Syc_5170
+H_5171
+M_5172
+F_5173
+NBH_5174
+P_5175
+SLC_5176
+Syc_5177
+H_5178
+M_5179
+F_5180
+P_5181
+SLC_5182
+Syc_5183
+H_5184
+M_5185
+F_5186
+NBH_5187
+P_5188
+SLC_5189
+Syc_5190
+H_5191
+M_5192
+H_5193
+M_5194
+Syc_5200
+H_5201
+SLC_5207
+Syc_5208
+P_5214
+SLC_5215
+NBH_5221
+P_5222
+F_5228
+NBH_5229
+M_5230
+M_5236
+F_5237
+NBH_5238
+H_5244
+M_5245
+F_5246
+" #list of duplicated sample_names - get from R
+
+for i in $prefixes; do cat "$i"* > "$i".merged.txt ; done
+
+for i in $prefixes; do rm "$i".fq.gz; rm "$i".1.fq.gz; done
+
+```
+
+
+## Read Mapping    
+
+__Summary__   
+
+  - Downloaded genome v3.0.2 from ENSEMBL  
+  - indexed with bwa  
+  - aligned all reads to f_het genome using bwa-mem and default options  
+
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=bwa_default
+
+# set name of output file
+#SBATCH --output=bwadefault.out
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+
+source /opt/samtools-1.6/source_me
+
+for i in `find ../cleaned_tags/ -name '*.gz'`
+do
+/opt/bio-bwa/bwa mem -t 38 ../genome/f_het_genome_3.0.2.fa.gz ../cleaned/${i} | /opt/samtools-1.6/bin/samtools view -@ 16 -bSu - | /opt/samtools-1.6/bin/samtools sort -@ 16 - -o ./${i:0:-6}.$
+
+done
+
+
+```
+
+#### BAM stats
+
+What are the depths of mapped reads (from bam files)?  
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=1
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=bam_depths
+
+# set name of output file
+#SBATCH --output=bam_depths
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+source /opt/samtools-1.6/source_me
+samtools=/opt/samtools-1.6/bin/samtools
+
+for i in *bam
+do
+$samtools depth $i | awk -v var="$i" '{sum += $3; n++} END {print " '${i%.bam}' ", sum / n}' >> depths.txt
+done
+
+
+```
+
+
+```{r, cache=TRUE}
+bam_depths<-read.table("./snp_calling/QC/depths.txt", sep = " ")
+bam_depths<-bam_depths[,-c(1,3)]
+colnames(bam_depths)<-c("fish_id", "depth")
+ggplot(data = bam_depths)+geom_density(aes(x = depth))+labs(title = "mean depth at mapped reads (bam) over all samples", x = "depth", y = "frequency")
+
+#we could also easily split up the depth file here to look at population level variation in depth
+```
+
+```{r}
+
+
+
+```
+
+
+
+let's also look at overall number mapped reads per sample  
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=1
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=bam_mapped_reads
+
+# set name of output file
+#SBATCH --output=bam_mapped_reads.out
+
+
+source /opt/samtools-1.6/source_me
+samtools=/opt/samtools-1.6/bin/samtools
+
+for i in *bam
+do
+{ $samtools view -c -F 4 $i; echo ${i%.bam} ; } | tr "\n" " " >> mapped_reads.txt
+done
+
+
+
+```
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+
+mapped_reads<-read.table("./snp_calling/QC/mapped_reads.txt", sep = " ")
+ggplot(data = mapped_reads)+geom_histogram(aes(x = log10(mapped_reads[,1])))+labs(title =  " mapped reads in bam files", x = "log10 reads")
+
+```
+
+
+__grandis__
+
+keeping grandis in the analysis may be useful to reconstruct the ancestral state of the genome and therefore create an unfolded SFS, but how well do the grandis reads align to the fundulus reference genome, let's compare the bam files:
+
+```{r message=FALSE, warning=FALSE}
+require(stringr)
+
+colnames(mapped_reads) <- c("reads", "sample")
+mapped_reads$pop<-str_extract(mapped_reads$sample, "[^_]+")
+mapped_reads %>%
+  group_by(pop) %>%
+  summarize(mean = mean(reads), sd = sd(reads), n = n())
+
+ggplot()+geom_density(data = mapped_reads[(mapped_reads$pop!="grandis"),],aes(x=reads))+geom_density(data = mapped_reads[(mapped_reads$pop=="grandis"),],aes(x=reads), color = "red")+labs(title = "total number mapped reads", subtitle = "red - grandis ; black - heteroclitus")  
+ 
+```
+
+this isn't ideal though, lets try to figure out the PROPORTION of reads mapped to the reference genome
+
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=1
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=bam_mapped_reads
+
+# set name of output file
+#SBATCH --output=bam_mapped_reads.out
+
+
+
+source /opt/samtools-1.6/source_me
+samtools=/opt/samtools-1.6/bin/samtools
+
+for i in *bam
+do
+{ $samtools view -c -F 0 $i; echo ${i%.bam} ; } | tr "\n" " " >> total_reads.txt
+done
+
+```
+
+```{r, cache = TRUE}
+
+#total_reads <- read.table("./snp_calling/QC/total_reads.txt", sep = " ")
+# make column of total reads, then proportion reads, plot again
+
+```
+
+
+
+## ANGSD
+
+__ANGSD Analysis outline__
+
+We conduct two sets of ANGSD analyses. The first calculates genotype likelihoods. The second estimates the site frequency spectrum.
+
+```{r }
+
+grViz("digraph flowchart {
+      # node definitions with substituted label text for placing code
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+      tab6 [label = '@@6']
+      tab7 [label = '@@7']
+      tab8 [label = '@@8']
+      tab9 [label = '@@9']
+
+      # edge definitions with the node IDs
+      tab1 -> tab3;
+      tab1 -> tab2;
+      tab3 -> tab4 -> tab5
+      tab4 -> tab6
+      tab3 -> tab7
+      tab3 -> tab8
+      tab9 -> tab1
+      }
+
+      [1]: 'ANGSD -GL 1 -doMaf -doMajorMinor -glf 2'
+      [2]: 'Allele Frequencies'
+      [3]: 'beagle format GLs'
+      [4]: 'covariance matrix (PCangsd)'
+      [5]: 'PCA (R)'
+      [6]: 'RDA/other multivariate EAAs (R)'
+      [7]: 'LD (ngsLD)'
+      [8]: 'Admixture (ngsAdmix)'
+      [9]: 'bam files'
+      
+      ")
+
+
+grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+      tab6 [label = '@@6']
+      tab7 [label = '@@7']
+      tab8 [label = '@@8']
+
+      # edge definitions with the node IDs
+      tab1 -> tab2
+      tab2 -> tab3
+      tab3 -> tab4 -> tab5
+      tab3 -> tab6
+      tab3 -> tab7
+      tab8 -> tab1
+      }
+
+      [1]: 'ANGSD -GL 1 -doSAF unfolded'
+      [2]: 'SAF'
+      [3]: 'SFS (realSFS)'
+      [4]: 'Dadi conversion '
+      [5]: 'moments/Dadi'
+      [6]: 'theta, tajD'
+      [7]: 'FST'
+      [8]: 'bam files'
+      
+      ")
+
+```
+
+
+
+### set up
+
+Create lists of bams for all the separate populations
+
+```{bash, eval = FALSE}
+
+#in server directory containing bams
+# for each population create a list of paths to bam files
+find "$(cd ..; pwd)" -iname "BP*bam" > ../BP.bams
+find "$(cd ..; pwd)" -iname "CT*bam" > ../CT.bams
+find "$(cd ..; pwd)" -iname "GA*bam" > ../GA.bams
+find "$(cd ..; pwd)" -iname "HB*bam" > ../HB.bams
+find "$(cd ..; pwd)" -iname "KC*bam" > ../KC.bams
+find "$(cd ..; pwd)" -iname "M_*bam" > ../M.bams
+find "$(cd ..; pwd)" -iname "MDIBL_*bam" > ../MDIBL.bams
+find "$(cd ..; pwd)" -iname "ME_*bam" > ../ME.bams
+find "$(cd ..; pwd)" -iname "MG_*bam" > ../MG.bams
+find "$(cd ..; pwd)" -iname "NBH_*bam" > ../NBH.bams
+find "$(cd ..; pwd)" -iname "F_*bam" > ../F.bams
+find "$(cd ..; pwd)" -iname "H_*bam" > ../H.bams
+find "$(cd ..; pwd)" -iname "P_*bam" > ../P.bams
+find "$(cd ..; pwd)" -iname "SYC_*bam" > ../SYC.bams
+find "$(cd ..; pwd)" -iname "NC_*bam" > ../NC.bams
+find "$(cd ..; pwd)" -iname "OC_*bam" > ../OC.bams
+find "$(cd ..; pwd)" -iname "RB_*bam" > ../RB.bams
+find "$(cd ..; pwd)" -iname "SC_*bam" > ../SC.bams
+find "$(cd ..; pwd)" -iname "SH_*bam" > ../SH.bams
+find "$(cd ..; pwd)" -iname "SLC_*bam" > ../SLC.bams
+find "$(cd ..; pwd)" -iname "SR_*bam" > ../SR.bams
+find "$(cd ..; pwd)" -iname "WNC_*bam" > ../WNC.bams
+find "$(cd ..; pwd)" -iname "grandis_*bam" > ../grandis.bams
+
+cat *bams > ALL.bamlist
+```
+
+
+first compress the genome and create a compression index 
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=bgzip_index
+
+# set name of output file
+#SBATCH --output=bgzip.out
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+source /opt/samtools-1.6/source_me
+
+/home/ddayan/software/htslib-1.9/bgzip -i -@ 10 f_het_genome_3.0.2.fa
+
+```
+
+then create a samtools index
+```{bash, eval = FALSE}
+samtools faidx f_het_genome_3.0.2.fa.gz
+```
+
+also need to index all the bam files
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=bgzip_index
+
+# set name of output file
+#SBATCH --output=bgzip.out
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+source /opt/samtools-1.6/source_me
+samtools=/opt/samtools-1.6/bin/samtools
+
+for i in ./*.bam;do $samtools index $i;done
+
+
+```
+
+
+
+### EDA
+
+#### coverage eda
+First lets take a look at coverage and allele freqeuncy to get an idea what the data looks like prior to filtering
+
+rationale for options:  
+  __command options__    
+ -P 10: use 10 threads  
+ -ref: path to reference genome  
+ -out: output  
+ -r : run on only one contig (to check speed)  
+ __filtering__  
+ -uniqueOnly: use only uniquley mapping reads  
+ -remove_bads: discard bad reads  
+ -trim 0: perform no trimming  
+ -C exclude reads with excessive mismatches  
+ -baq avoid SNPs called due to indels  
+ -minmapQ exclude reads with poor mapping  
+ -maxDepth - r)ead depth above this level are binned (set high to llok at actual depth distrubution  
+ __dos__  
+ doqsdist calulates distribution of quality scores of used reads  
+ dodepth calculates distrubtion of read depths  
+ docounts needed for depth calcuation    
+
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=bwa_default
+
+# set name of output file
+#SBATCH --output=bwadefault.out
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+$ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc \
+  -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -maxDepth 1000 \
+	-minMapQ 20 -doQsDist 1 -doDepth 1 -doCounts 1
+
+```
+
+
+
+**results of initial ANGSD run**
+Q scores and global depth 
+```{r message=FALSE, warning=FALSE, cache= TRUE}
+## barplot q-scores
+qs <- read.table(file = "./snp_calling/ANGSD_outputs/qc_check/ALL.qc.qs", head=T, stringsAsFactors=F)
+barplot(height=qs$counts, names.arg=qs$qscore, xlab="Q-score", ylab="Counts", main = "Q-score distribution")
+
+## global depth
+dep <- as.numeric(scan(file = "./snp_calling/ANGSD_outputs/qc_check/ALL.qc.depthGlobal",what="char", quiet=T))
+dep_freq<-as.data.frame(cbind(dep, seq(1:length(dep))))
+colnames(dep_freq)<-c("count", "depth")
+dep_freq$depth<-dep_freq$depth-1
+ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "global depths (summed across all fish)")
+ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "subset of plot above")+xlim(0, 100)
+```
+
+
+
+
+__Depths for a handful of individuals:__  
+```{r, warning=FALSE, cache=TRUE}
+## individual depth
+idep<-read.table("./snp_calling/ANGSD_outputs/qc_check/ALL.qc.depthSample")
+#look at read depth histogram for the first tenindividual
+i1<-as.data.frame(t(idep[1,]))
+i1$depth<-c(0:999, by = 1)
+colnames(i1)<-c("log10count", "depth")
+i1$log10count <- log10(i1$log10count)
+ggplot(data = i1, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")
+
+i200<-as.data.frame(t(idep[1,]))
+i200$depth<-c(0:999, by = 1)
+colnames(i200)<-c("log10count", "depth")
+i200$log10count <- log10(i200$log10count)
+ggplot(data = i200, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")
+
+i505<-as.data.frame(t(idep[1,]))
+i505$depth<-c(0:999, by = 1)
+colnames(i505)<-c("log10count", "depth")
+i505$log10count <- log10(i505$log10count)
+ggplot(data = i200, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth", title = )
+
+```
+
+**other salient results**
+Total number of sites analyzed: 567547
+Number of sites retained after filtering: 559561
+
+thoughts here:
+  - most sites have very limited depth, with 1480 samples, the global depth is largely less than 1000  
+  - 59000 sites (about 10%) have more than 1000 reads, are these driven by a moderate depth in a lot of individuals or extremely high depth in just a few?  
+  - lets run this again but only retain sites present in 80% of individuals
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=bwa_default
+
+# set name of output file
+#SBATCH --output=bwadefault.out
+
+# send mail to this address
+#SBATCH --mail-user=ddayan@clarku.edu
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+$ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc -r KN811289.1 \
+  -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -maxDepth 1000 -minInd 1184 \
+	-minMapQ 20 -doQsDist 1 -doDepth 1 -doCounts 1
+
+```
+
+no sites were retained with this level of filtering,
+lets scale up to the ful genome and see how many sites with coverage in 80% of individuals we get: 2702 sites ... 
+
+this ANGSD output is very sparse, how many loci are these sites spread across? how many reads are they based on before and after filtering? what are the mapping qualities? why is the depth data presented in the least convenient imaginable format? I miss stacks and tassel...
+
+lets try again but a little less stringent, here we retain sites with coverage in 70% of fundulus heterociltis in the dataset (1010), 
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=angsd_0.7
+
+# set name of output file
+#SBATCH --output=angsd_0.7.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+$ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc -r KN811289.1 \
+  -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -minInd 1010 \
+	-minMapQ 20
+```
+
+
+how many loci is this over? we can use gatk countloci for this
+
+prep:
+```{bash, eval = FALSE}
+
+GATK="/opt/java/jdk1.8.0_121/bin/java -jar /opt/Gatk/GenomeAnalysisTK.jar"
+
+#create dictionary for gatk
+java -jar /opt/picard-tools-1.119/CreateSequenceDictionary.jar R= fundulus/genome/f_het_genome_3.0.2.fa O= fundulus/genome/f_het_genome_3.0.2.dict
+#create an index for the uncompressed genome file (gatk only run on decompressed reference genomes)
+samtools faidx f_het_genome_3.0.2.fa
+
+#now we can finally try to run GATK
+
+$GATK -T CountLoci -R f_het_genome_3.0.2.fa -I ../aligned/OC_421.merged.bam
+
+
+####agh this doesn't work because read groups were not retained in the bam files...
+
+
+```
+
+  
+
+#### gl EDA (gl_0.1)
+
+Here we're going to finally run ANGSD
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=angsd_GL_0.1
+
+# set name of output file
+#SBATCH --output=angsd_GL_0.1.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+FILTERS="-minInd 740 -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -skipTriallelic 1 -SNP_pval 1e-6 -minMapQ 20 -maxDepth 14800"
+DOS="-GL 1 -doMajorMinor 1 -doMaf 2 -doGlf 2 -doCounts 1 -doDepth 1" 
+
+$ANGSD -P 38 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc \
+  $FILTERS $DOS \
+
+```
+
+##### gl_0.1 results
+
+Total number of sites analyzed: 80148766  
+Number of sites retained after filtering: 62571
+
+__Coverage__
+```{r, cache = TRUE}
+## global depth
+dep <- as.numeric(scan(file = "./snp_calling/ANGSD_outputs/run_0.1//ALL.qc.depthGlobal",what="char", quiet=T))
+dep_freq<-as.data.frame(cbind(dep, seq(1:length(dep))))
+colnames(dep_freq)<-c("count", "depth")
+dep_freq$depth<-dep_freq$depth-1
+dep_freq$log_count<-log10(dep_freq$count)
+ggplot(data = dep_freq, aes(depth, log_count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "global depths (summed across all fish)")
+```
+
+
+Of the 62571 sites, 47984 (76%) have more than 14800 reads and show up as a single thin bar at 14800 in this plot
+
+```{r, cache= TRUE}
+## individual depth
+idep<-read.table("./snp_calling/ANGSD_outputs/run_0.1/ALL.qc.depthSample")
+#look at read depth histogram for the first tenindividual
+#i100<-as.data.frame(t(idep[1,]))
+#i100$depth<-c(0:14799, by = 1)
+#colnames(i100)<-c("log10count", "depth")
+#i100$log10count <- log10(i100$log10count)
+#ggplot(data = i100, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,500))
+
+i100<-as.data.frame(t(idep[100,]))
+i100$depth<-c(0:14799, by = 1)
+i100$log10count <- log10(i100$`1`)
+colnames(i100)<-c("count", "depth", "log10count")
+#ggplot(data = i100, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,500))
+ggplot(data = i100, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,400))+ylim(c(0,4000))+labs(title = "individual 100")
+
+i1000<-as.data.frame(t(idep[1000,]))
+i1000$depth<-c(0:14799, by = 1)
+i1000$log10count <- log10(i1000$`1000`)
+colnames(i1000)<-c("count", "depth", "log10count")
+#ggplot(data = i1000, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,1000))
+ggplot(data = i1000, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,400))+ylim(c(0,2000))+labs(title = "individual 1000")
+
+
+i500<-as.data.frame(t(idep[500,]))
+i500$depth<-c(0:14799, by = 1)
+i500$log10count <- log10(i500$`500`)
+colnames(i500)<-c("count", "depth", "log10count")
+#ggplot(data = i500, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,500))
+ggplot(data = i500, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,300))+ylim(c(0,3000))+labs(title = "individual 500")
+
+
+i148<-as.data.frame(t(idep[148,]))
+i148$depth<-c(0:14799, by = 1)
+i148$log10count <- log10(i148$`148`)
+colnames(i148)<-c("count", "depth", "log10count")
+#ggplot(data = i148, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,148))
+ggplot(data = i148, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,300))+ylim(c(0,3000))+labs(title = "grandis individual")
+```
+ 
+ 
+ if we look at a handful of depth for individual fish (reads per locus per individual) we observe a nice distribution with mostly >20x coverage
+ 
+ 
+#### PCA eda
+
+a note on installation (code chunk below):  
+
+```{bash, eval = FALSE}
+
+#didn't want to wait for HPC to install pcangsd so did it locally. the problem (as always) is that pcangsd has depnedinecies that get install to local python but slurm calls a different python. used the tool virtualenv to get around this
+
+#create the virtual environment in the directory containing pcagnsd
+virtualenv software/pcangsd/
+cd software/pcangsd/
+#ctivate it
+source bin/activate
+
+#install dependcies and angsd
+pip install cython
+pip install numpy
+python setup.py build_ext --inplace
+pip install -r requirements.txt
+
+#check install
+python pcangsd.py
+
+#deactive virtualenv
+
+#when running in batch script make sure to source this virtual env before executing the actual command
+deactivate
+
+
+```
+
+
+ok now lets try a PCA
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=pcangsd_0.1
+
+# set name of output file
+#SBATCH --output=pcangsd_0.1.out
+
+
+
+source /home/ddayan/software/pcangsd/bin/activate
+python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/ALL_gl_0.1.beagle.gz -o pcangsd.gl_0.1 -threads 38
+
+
+```
+
+Let's looks at these PCA results
+
+```{r, cache = TRUE}
+
+cov_mat<-read.table("./pcangsd/pcangsd.gl_0.1.cov", sep = " ")
+
+filenames = scan("./snp_calling/ANGSD_outputs/ALL.bamlist", what="character")
+fish_names = gsub("/home/ddayan/fundulus/aligned/", "", gsub(".merged", "", gsub(".bam", "",  filenames)))
+
+pc1<-prcomp(cov_mat)
+
+pc_inds<-as.data.frame(pc1$x)
+row.names(pc_inds)<-fish_names
+pc_inds$pop<-gsub("_\\d+", "", fish_names)
+
+#caution this deletes al nbh pops except nbh, fix later
+pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
+
+ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+
+plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
+
+```
+
+hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document
+
+it looks like there are some QC issues to take on (or a grandis individual is more similar to f het than other grandis), but that this approach is at least working well enough to differentiate pops in PC space
+
+### Genotype Likelihoods
+
+#### filtering rationale
+
+__grandis__  
+we will use the grandis reads to create a grandis consensus sequence (dofasta in angsd) which will be used as the ancestral state for unfolded SFS estimation, but we will not estimate genotype likelihoods in grandis as this will influence SNP probabilities and it seems that including grandis dominates the structure found by PCA
+
+
+__HWE__  
+no HWE filtering, filtering out paralogues by using excess coverage instead - rationale here is that HWE is likely to be skewed given the amount of population strcutre in the sample and that filtering by HWE stratified by population is not possible in the ANGSD pipeline  
+
+__MAF__  
+MAF filtering will skew the SFS and should not be applied to the methods that rely on SFS (demography inference, FST), but the inclusion of singletons called genotyped datasets can confound STRUCTURE (little effect on multivariate population structure algorithms e.g. PCA DAPC). My assumption is that the use of genotype likelihoods instead of called genotypes should reduce the impact of singletons or low frequency alleles (erroneous or true) on the inference of structure using model based approaches like STRUCTURE, and the inclusion of rare alleles will improve discrimination among recently diverged populations (or populations with rare gene flow) when using multivariate approaches
+
+__max_coverage__  
+will set max coverage at 2.5x the modal coverage per locus, this means will have to run ANGSD again with a higher maxdepth cutoff for the coverage output in order to estimate it...
+
+__min_coverage_locus__  
+no hard minimum coverage cutoff, instead use stringent snp_pval cutoff and minimum number of individuals (we require that a site be present in 50% of samples - 686)
+
+__minimum_coverage_ind__  
+the mean coverage for the individuals (at the bam level) is ~730k, but a handful of individuals have very low coverege (see bam stats section), will remove these individuals BEFORE ANGSD analysis by editing bam_lists, removed individuals in the lowest 5% of the coverage distribution
+
+__snp_pval__  
+impose stringent probablility cutoff for reatining a SNP: 1e-6
+
+__quality_and_mapping__  
+-uniqueOnly 1 -remove_bads 1 -C 50 -baq 1 -skipTriallelic 1  -minMapQ 20
+
+
+#### ANGSD GL Run 1.2x
+
+version history
+1.0 first run
+1.1 removed outlier high coverage
+1.2 start from scratch with mislabeled GA fish removed - GA_3318 clustered with grandis in PC space and also was it's own group in PCA run on genotype likelihoods v1.1
+
+Make list of bam files, filtering out grandis and individuals in the lowest 5% of reads: 
+```{r, eval = FALSE}
+#get rid of individuals with low sequencing
+bad_inds <- mapped_reads[mapped_reads$V1<quantile(mapped_reads$V1, 0.05),2]
+#also get rid of mislabeled individual - pca_1.1 showed that "GA_3318" is most likely a grandis
+bad_inds<-append(bad_inds, mapped_reads[140,2])
+bad_inds <- mapped_reads[bad_inds,2]
+write.table(bad_inds, file = "./snp_calling/QC/bad_inds.txt", quote = FALSE, row.names = FALSE)
+
+```
+
+```{bash, eval = FALSE}
+
+grep -v -f ./snp_calling/QC/bad_inds.txt ./snp_calling/ANGSD_outputs/ALL.bamlist | grep -v 'grandis' > ./snp_calling/QC/good_no_grandis_2.bamlist
+
+```
+
+This removed all grandis, 72 individuals with too few reads and 1 individual labeled as GA but actually grandis, leaving a final dataset of 1371 individuals.
+
+Make genotype likelihood estimation v1.2
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=angsd_GL_1.0
+
+# set name of output file
+#SBATCH --output=angsd_GL_1.0.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+FILTERS="-minInd 686 -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -skipTriallelic 1 -SNP_pval 1e-6 -minMapQ 20"
+DOS="-GL 1 -doMajorMinor 1 -doMaf 2 -doGlf 2 -doCounts 1 -dumpCounts 2" 
+
+$ANGSD -P 38 -b ../meta_data/good_no_grandis_2.bamlist -ref $REF -out ./Results/gl_1.2 \
+  $FILTERS $DOS \
+
+```
+
+XXXXX
+proceed from here using 1.2
+XXXXXXX
+
+
+Total number of sites analyzed: 78663923
+Number of sites retained after filtering: 77717 
+	
+	
+### Coverage
+
+Extract and plot coverage data
+
+```{r, cache = TRUE}
+
+#check the format before running this
+depths_loci<-read.table("./snp_calling/QC/depths_1.0.txt", header = T, sep = "\t")
+
+#mode calculation
+getMode <- function(x) {
+keys <- unique(x)
+keys[which.max(tabulate(match(x, keys)))]
+}
+
+modal_depth <- getMode(depths_loci$totDepth)
+ggplot(data = depths_loci) + geom_histogram(aes(x = totDepth))+xlim(c(0,75000)) + geom_vline(aes(xintercept = modal_depth), color = "red") + geom_vline(aes(xintercept = 2.5*modal_depth), color = "blue")
+
+```
+
+The modal depth per locus is `modal_depth`. All loci with 2.5x greater read depth are then filtered out.
+
+```{r filter paralogues, eval = FALSE}
+
+#find loci with >2.5x the mode and filter then write out to loci list which will be used to filter the GL outputs (filtered datasets are named 1.1)
+sites_to_keep<-subset(depths_loci, totDepth < 2.5*modal_depth)
+write.table(sites_to_keep[,c(1,2)], file = "./snp_calling/QC/sites_to_keep.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+
+#get bad sites and store in beagle call format
+sites_to_remove<-subset(depths_loci, totDepth > 2.5*modal_depth)
+sites_to_remove$beagle_id<-paste(sites_to_remove$chr, "_", sites_to_remove$pos, sep = "")
+write.table(sites_to_remove[,c(4)], file = "./snp_calling/QC/sites_to_remove.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+```
+
+The original dataset had 77717 SNPs, after fitlering out SNPs with greater than 2.5x the mode coverage (15125x = mode) there are 75627 SNPs
+
+```{bash server filtering, eval = FALSE}
+#filtering the datasets
+
+zcat gl_1.0.beagle.gz > gl_1.0.beagle 
+awk 'FNR==NR { a[$1]; next } !($1 in a){print $0}'  sites_to_remove.txt gl_1.0.beagle  > gl_1.1.beagle
+bgzip gl_1.1.beagle 
+```
+
+
+
+## Population Structure 
+
+### PCA
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=pcangsd_1.1
+
+# set name of output file
+#SBATCH --output=pcangsd_1.1.out
+
+
+
+source /home/ddayan/software/pcangsd/bin/activate
+python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/gl_1.1.beagle.gz -o pcangsd.gl_1.1 -threads 38 -minMaf 0.0
+```
+
+__PCANGSD run info:__  
+
+Estimating population allele frequencies
+EM (MAF) converged at iteration: 12
+
+Estimating covariance matrix
+Using 5 principal components (MAP test)
+
+```{r, cache = TRUE}
+
+cov_mat<-read.table("./pcangsd/pcangsd.gl_1.1.cov", sep = " ")
+
+filenames <- mapped_reads[! mapped_reads$V2 %in% bad_inds,]
+filenames <- filenames[!grepl("grandis", filenames$V2),]
+filenames <- filenames[-c(1373, 1374),]
+
+
+fish_names =  gsub(".merged", "", filenames$V2)
+
+pc1<-prcomp(cov_mat)
+
+pc_inds<-as.data.frame(pc1$x)
+row.names(pc_inds)<-fish_names
+pc_inds$pop<-gsub("_\\d+", "", fish_names)
+
+#caution this deletes al nbh pops except nbh, fix later
+pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
+
+ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+
+plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
+```
+
+There is 1 outlier fish ("GA_3318"). Given that this fish was caught in Georgia, it is likely a misidentified grandis is needs to be excluded from the analysis. New GL file and all resulting analysis labeled 1.2
+
+```{bash}
+zcat gl_1.1.beagle.gz | grep -v "GA_3318" | wc -l
+gre
+awk 'FNR==NR { a[$1]; next } !($1 in a){print $0}'  sites_to_remove.txt gl_1.0.beagle  > gl_1.1.beagle
+bgzip gl_1.1.beagle 
+```
+
+
+### Admixture
+
+## SFS
+
+### 1d SFS estimation
+
+### 2d SFS
+
+### FST and per site summary stats
+
+
+
+
