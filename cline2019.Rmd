@@ -1654,15 +1654,16 @@ version history
 1.0 first run
 1.1 removed outlier high coverage
 1.2 start from scratch with mislabeled GA fish removed - GA_3318 clustered with grandis in PC space and also was it's own group in PCA run on genotype likelihoods v1.1
+1.3 coverage filtered output of 1.2
 
 Make list of bam files, filtering out grandis and individuals in the lowest 5% of reads: 
-```{r, eval = FALSE}
+```{r }
 #get rid of individuals with low sequencing
-bad_inds <- mapped_reads[mapped_reads$V1<quantile(mapped_reads$V1, 0.05),2]
+bad_inds <- mapped_reads[mapped_reads$reads<quantile(mapped_reads$reads, 0.05),2]
 #also get rid of mislabeled individual - pca_1.1 showed that "GA_3318" is most likely a grandis
 bad_inds<-append(bad_inds, mapped_reads[140,2])
 bad_inds <- mapped_reads[bad_inds,2]
-write.table(bad_inds, file = "./snp_calling/QC/bad_inds.txt", quote = FALSE, row.names = FALSE)
+#write.table(bad_inds, file = "./snp_calling/QC/bad_inds.txt", quote = FALSE, row.names = FALSE)
 
 ```
 
@@ -1704,14 +1705,15 @@ $ANGSD -P 38 -b ../meta_data/good_no_grandis_2.bamlist -ref $REF -out ./Results/
 
 ```
 
-XXXXX
-proceed from here using 1.2
-XXXXXXX
 
-
+Run 1.0:
 Total number of sites analyzed: 78663923
 Number of sites retained after filtering: 77717 
-	
+
+Run 1.2
+Total number of sites analyzed: 78419827
+Number of sites retained after filtering: 75430 
+
 	
 ### Coverage
 
@@ -1720,7 +1722,7 @@ Extract and plot coverage data
 ```{r, cache = TRUE}
 
 #check the format before running this
-depths_loci<-read.table("./snp_calling/QC/depths_1.0.txt", header = T, sep = "\t")
+depths_loci<-read.table("./snp_calling/QC/gl_1.2.pos", header = T, sep = "\t")
 
 #mode calculation
 getMode <- function(x) {
@@ -1752,9 +1754,9 @@ The original dataset had 77717 SNPs, after fitlering out SNPs with greater than 
 ```{bash server filtering, eval = FALSE}
 #filtering the datasets
 
-zcat gl_1.0.beagle.gz > gl_1.0.beagle 
-awk 'FNR==NR { a[$1]; next } !($1 in a){print $0}'  sites_to_remove.txt gl_1.0.beagle  > gl_1.1.beagle
-bgzip gl_1.1.beagle 
+zcat gl_1.2.beagle.gz > gl_1.2.beagle 
+awk 'FNR==NR { a[$1]; next } !($1 in a){print $0}'  sites_to_remove.txt gl_1.2.beagle  > gl_1.3.beagle
+bgzip gl_1.3.beagle 
 ```
 
 
@@ -1775,18 +1777,20 @@ bgzip gl_1.1.beagle
 #SBATCH --partition=week-long-cpu
 
 # set name of job
-#SBATCH --job-name=pcangsd_1.1
+#SBATCH --job-name=pcangsd_1.3
 
 # set name of output file
-#SBATCH --output=pcangsd_1.1.out
+#SBATCH --output=pcangsd_1.3.out
 
 
 
 source /home/ddayan/software/pcangsd/bin/activate
-python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/gl_1.1.beagle.gz -o pcangsd.gl_1.1 -threads 38 -minMaf 0.0
+python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/gl_1.3.beagle.gz -o pcangsd.gl_1.1 -threads 38 -minMaf 0.0
 ```
 
 __PCANGSD run info:__  
+
+Read 1371 samples and 73375 sites
 
 Estimating population allele frequencies
 EM (MAF) converged at iteration: 12
@@ -1794,16 +1798,17 @@ EM (MAF) converged at iteration: 12
 Estimating covariance matrix
 Using 5 principal components (MAP test)
 
+
 ```{r, cache = TRUE}
 
-cov_mat<-read.table("./pcangsd/pcangsd.gl_1.1.cov", sep = " ")
+cov_mat<-read.table("./pcangsd/pcangsd.gl_1.3.cov", sep = " ")
 
-filenames <- mapped_reads[! mapped_reads$V2 %in% bad_inds,]
-filenames <- filenames[!grepl("grandis", filenames$V2),]
-filenames <- filenames[-c(1373, 1374),]
+filenames <- mapped_reads[! mapped_reads$sample %in% bad_inds,]
+filenames <- filenames[!grepl("grandis", filenames$sample),]
+filenames <- filenames[-c(1372, 1373),]
 
 
-fish_names =  gsub(".merged", "", filenames$V2)
+fish_names =  gsub(".merged", "", filenames$sample)
 
 pc1<-prcomp(cov_mat)
 
@@ -1815,6 +1820,7 @@ pc_inds$pop<-gsub("_\\d+", "", fish_names)
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
 
 ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+
 
 plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
 ```
