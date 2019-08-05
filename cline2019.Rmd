@@ -9,10 +9,12 @@ output:
 
 ```{r packages, message=FALSE, warning=FALSE, include=FALSE}
 require(knitr)
-require(ggplot2)
+require(tidyverse)
 require(DiagrammeR)
 require(dplyr)
 require(plotly)
+require(stringr)
+
 ```
 
 
@@ -1006,7 +1008,6 @@ __grandis__
 keeping grandis in the analysis may be useful to reconstruct the ancestral state of the genome and therefore create an unfolded SFS, but how well do the grandis reads align to the fundulus reference genome, let's compare the bam files:
 
 ```{r message=FALSE, warning=FALSE}
-require(stringr)
 
 colnames(mapped_reads) <- c("reads", "sample")
 mapped_reads$pop<-str_extract(mapped_reads$sample, "[^_]+")
@@ -1675,6 +1676,8 @@ grep -v -f ./snp_calling/QC/bad_inds.txt ./snp_calling/ANGSD_outputs/ALL.bamlist
 
 This removed all grandis, 72 individuals with too few reads and 1 individual labeled as GA but actually grandis, leaving a final dataset of 1371 individuals.
 
+
+
 Make genotype likelihood estimation v1.2
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -1737,19 +1740,21 @@ ggplot(data = depths_loci) + geom_histogram(aes(x = totDepth))+xlim(c(0,75000)) 
 
 The modal depth per locus is `modal_depth`. All loci with 2.5x greater read depth are then filtered out.
 
-```{r filter paralogues, eval = FALSE}
+```{r filter paralogues}
+
+#note, remove comments if need to write the outputs to file
 
 #find loci with >2.5x the mode and filter then write out to loci list which will be used to filter the GL outputs (filtered datasets are named 1.1)
 sites_to_keep<-subset(depths_loci, totDepth < 2.5*modal_depth)
-write.table(sites_to_keep[,c(1,2)], file = "./snp_calling/QC/sites_to_keep.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+#write.table(sites_to_keep[,c(1,2)], file = "./snp_calling/QC/sites_to_keep.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
 
 #get bad sites and store in beagle call format
 sites_to_remove<-subset(depths_loci, totDepth > 2.5*modal_depth)
 sites_to_remove$beagle_id<-paste(sites_to_remove$chr, "_", sites_to_remove$pos, sep = "")
-write.table(sites_to_remove[,c(4)], file = "./snp_calling/QC/sites_to_remove.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+#write.table(sites_to_remove[,c(4)], file = "./snp_calling/QC/sites_to_remove.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
 ```
 
-The original dataset had 77717 SNPs, after fitlering out SNPs with greater than 2.5x the mode coverage (15125x = mode) there are 75627 SNPs
+GL_1.2 had `nrow(depths_loci)` SNPs, after fitlering out SNPs with greater than 2.5x the mode coverage (`modal_depth`x = mode) there are `nrow(sites_to_keep)` SNPs
 
 ```{bash server filtering, eval = FALSE}
 #filtering the datasets
@@ -1827,19 +1832,168 @@ plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="mar
 
 There is 1 outlier fish ("GA_3318"). Given that this fish was caught in Georgia, it is likely a misidentified grandis is needs to be excluded from the analysis. New GL file and all resulting analysis labeled 1.2
 
-```{bash}
-zcat gl_1.1.beagle.gz | grep -v "GA_3318" | wc -l
-gre
-awk 'FNR==NR { a[$1]; next } !($1 in a){print $0}'  sites_to_remove.txt gl_1.0.beagle  > gl_1.1.beagle
-bgzip gl_1.1.beagle 
+### Admixture
+
+NGSadmix is used to estimate ancestry for K = 1-6 with 10 replicate runs and best k determined by evanno
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=ngsadmix_1.3_k9
+
+# set name of output file
+#SBATCH --output=ngsadmix_1.3_k9
+
+
+NGSadmix="/opt/angsd0.928/angsd/misc/NGSadmix"
+BEAGLE="/home/ddayan/fundulus/ANGSD/Results/gl_1.3.beagle.gz"
+
+Out_Prefix="1.3_k9"
+K="9"
+
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.1 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.2 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.3 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.4 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.5 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.6 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.7 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.8 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.9 -P 10 -minMaf 0
+$NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.10 -P 10 -minMaf 0
+
+
+
 ```
 
+Plot admixture portions for a single run of k = 2
+```{r message=FALSE, warning=FALSE}
 
-### Admixture
+#make popfile
+pops<- as.data.frame(cbind(fish_names, gsub("_\\d+", "", fish_names)))
+colnames(pops) <- c("sample", "pop")
+
+#plot a admixture plot
+q<-read.table("./ngs_admix/sandbox/outFileName.qopt")
+    #set order of poulations by latitude
+
+q$sample <- pops$sample
+q$pop <- pops$pop
+
+pops$pop <- factor( as.character(pops$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "Mg", "CT", "SR", "BP", "HB", "Hb", "H", "F", "M", "Syc", "NBH", "P", "SLC", "ME", "MDIBL") )
+ord <- order(pops$pop)
+
+q <- q[ord,]
+
+plot_data <- q %>% 
+  mutate(id = sample) %>% 
+  gather('cluster', 'prob', V1:V2) %>% 
+  group_by(id) %>% 
+  mutate(likely_assignment = cluster[which.max(prob)],
+         assingment_prob = max(prob)) %>% 
+  arrange(likely_assignment, desc(assingment_prob)) %>% 
+  ungroup() %>% 
+  dplyr::arrange(factor( as.character(pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "Mg", "CT", "SR", "BP", "HB", "Hb", "H", "F", "M", "Syc", "NBH", "P", "SLC", "ME", "MDIBL")  ))
+
+#reorder levels
+plot_data$pop <- factor( as.character(plot_data$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "Mg", "CT", "SR", "BP", "HB", "Hb", "H", "F", "M", "Syc", "NBH", "P", "SLC", "ME", "MDIBL")  )
+
+
+
+#ggplot(plot_data, aes(id, prob, fill = cluster)) +
+#  geom_col() +
+#  theme_classic()
+
+ggplot(plot_data, aes(id, prob, fill = cluster)) +
+  geom_col() +
+  facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.01, "lines"), axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position = "none")
+```
+
+format data for clumpak
+
+```{bash, eval = FALSE}
+
+(for log in `ls *.log`; do grep -Po 'like=\K[^ ]+' $log; done) > logfile
+
+```
+ 
+```{r}
+
+
+logs <- as.data.frame(read.table("./ngs_admix/logfile_likelihoods.txt"))
+logs$K <- c(rep("1", 10), rep("2", 
+    10), rep("3", 10), rep("4", 10), rep("5", 10), rep("6", 10))
+colnames(logs)[1] <- "likelihood"
+write.table(logs[, c(2, 1)], "/ngs_admix/logfile_likelihood_formatted.txt", row.names = F, 
+    col.names = F, quote = F)
+```
+
+delta K method suggest best K is 2, but prob(k) is maximixed at k = 6, therefore will run for more K
 
 ## SFS
 
+__SFS Analysis Outline__  
+* Make consensus sequence from grandis reads to polarize the SAF - doFasta -2  
+* estimate SAFs for each population and metapopulation  -doSAF
+* estimate per population SFS  
+* estimate 2dSFS for each pair of populations  
+* 1d and 2dSFS used in downstream analyses: per-site summary statistics, global Fst, and dadi  
+
+questions: 
+*is it possible to estimate SAF without re-estimating GLs (we already have them)
+*what filtering is neccesarry for the population and 2d sfs, when there are so few indiviudals a maf of 1% becomes unmeaningful, should we filter to a higher MAF or at least, increase min number of individuals for a site to be retained (i.e. saf estimate is likely to be very very bad if there are sites with 2 individuals)
+*how should we pool sampling locales into metapopulations (i.e. it's clear that all the NBH populations should be combined into a single pop, but what about all NJ populations or all ME populations) - what spatial or genetic scale should be the cutoff for pooling populations
+
+
 ### 1d SFS estimation
+
+__ancestral sequence__
+
+Polarize SAF by an outgroup (f grandis)
+use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
+
+```{bash, eval = FALSE}
+
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=consensus
+
+# set name of output file
+#SBATCH --output=consensus.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+FILTERS="-uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -minMapQ 20"
+DOS="-doFasta 2 -doCounts 1 -dumpCounts 2" 
+
+$ANGSD -P 38 -b ../meta_data/grandis.bams -ref $REF -out ./Results/grandis_consensus.fa \
+  $FILTERS $DOS \
+```
+
+
+__SAF 1 big population__
+
+
 
 ### 2d SFS
 

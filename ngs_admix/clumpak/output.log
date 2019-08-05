@@ -1,0 +1,49 @@
+Mon Aug  5 18:08:26 2019: Running validation tests on input files
+Mon Aug  5 18:08:26 2019: Finished validating - Submitting job to queue
+Mon Aug  5 18:08:28 2019: Job 1565028495 was submitted to queue.
+Mon Aug  5 21:08:32 2019: Job 1565028495 started running.
+Mon Aug  5 21:08:32 2019: Retrieving data from files for each K
+Mon Aug  5 21:08:32 2019: K=1 mean: -67541631.4337156
+Mon Aug  5 21:08:32 2019: K=1 standard deviation: 1.66233397269996e-05
+Mon Aug  5 21:08:32 2019: K=1 median: -67541631.4337215
+Mon Aug  5 21:08:32 2019: K=2 mean: -66171730.7188219
+Mon Aug  5 21:08:32 2019: K=2 standard deviation: 0.388688468461447
+Mon Aug  5 21:08:32 2019: K=2 median: -66171730.6055155
+Mon Aug  5 21:08:32 2019: K=3 mean: -65881787.1713705
+Mon Aug  5 21:08:32 2019: K=3 standard deviation: 53884.6413727164
+Mon Aug  5 21:08:32 2019: K=3 median: -65848222.9251115
+Mon Aug  5 21:08:32 2019: K=4 mean: -65647388.432078
+Mon Aug  5 21:08:32 2019: K=4 standard deviation: 312.517050097786
+Mon Aug  5 21:08:32 2019: K=4 median: -65647148.4101775
+Mon Aug  5 21:08:32 2019: K=5 mean: -65535941.553303
+Mon Aug  5 21:08:32 2019: K=5 standard deviation: 8871.3113993325
+Mon Aug  5 21:08:32 2019: K=5 median: -65535878.6804065
+Mon Aug  5 21:08:32 2019: K=6 mean: -65430110.9148537
+Mon Aug  5 21:08:32 2019: K=6 standard deviation: 15901.8589000316
+Mon Aug  5 21:08:32 2019: K=6 median: -65424980.9940085
+Mon Aug  5 21:08:32 2019: Calculating Best K by Evanno
+Mon Aug  5 21:08:32 2019: Ln'(2) = 1369900.71489371
+Mon Aug  5 21:08:32 2019: Ln'(3) = 289943.547451384
+Mon Aug  5 21:08:32 2019: Ln'(4) = 234398.739292517
+Mon Aug  5 21:08:32 2019: Ln'(5) = 111446.878775001
+Mon Aug  5 21:08:32 2019: Ln'(6) = 105830.638449311
+Mon Aug  5 21:08:32 2019: |Ln''(K=2)| = 1079957.16744232
+Mon Aug  5 21:08:32 2019: |Ln''(K=3)| = 55544.8081588671
+Mon Aug  5 21:08:32 2019: |Ln''(K=4)| = 122951.860517517
+Mon Aug  5 21:08:32 2019: |Ln''(K=5)| = 5616.24032568932
+Mon Aug  5 21:08:32 2019: Delta(K=2) = 2778464.64475042
+Mon Aug  5 21:08:32 2019: Delta(K=3) = 1.030809647125
+Mon Aug  5 21:08:32 2019: Delta(K=4) = 393.424488292863
+Mon Aug  5 21:08:32 2019: Delta(K=5) = 0.633078929695997
+Mon Aug  5 21:08:32 2019: Max Delta K: 2778464.64475042
+Mon Aug  5 21:08:32 2019: Optimal K by Evanno is: 2
+Mon Aug  5 21:08:32 2019: Using median values of Ln Prob of Data to calculate Prob(K=k):
+Mon Aug  5 21:08:32 2019: Prob(K=1) = 0
+Mon Aug  5 21:08:32 2019: Prob(K=2) = 0
+Mon Aug  5 21:08:32 2019: Prob(K=3) = 0
+Mon Aug  5 21:08:32 2019: Prob(K=4) = 0
+Mon Aug  5 21:08:32 2019: Prob(K=5) = 0
+Mon Aug  5 21:08:32 2019: Prob(K=6) = 1
+Mon Aug  5 21:08:32 2019: Max Probability: 1
+Mon Aug  5 21:08:32 2019: The k for which Prob(K=k) obtains the highest value is: 6
+Mon Aug  5 21:08:32 2019: Creating job zip file
