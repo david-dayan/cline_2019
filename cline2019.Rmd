@@ -1474,7 +1474,7 @@ Total number of sites analyzed: 80148766
 Number of sites retained after filtering: 62571
 
 __Coverage__
-```{r, cache = TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE}
 ## global depth
 dep <- as.numeric(scan(file = "./snp_calling/ANGSD_outputs/run_0.1//ALL.qc.depthGlobal",what="char", quiet=T))
 dep_freq<-as.data.frame(cbind(dep, seq(1:length(dep))))
@@ -1593,7 +1593,7 @@ python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/ALL_gl_0.1.be
 
 Let's looks at these PCA results
 
-```{r, cache = TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE}
 
 cov_mat<-read.table("./pcangsd/pcangsd.gl_0.1.cov", sep = " ")
 
@@ -1722,7 +1722,7 @@ Number of sites retained after filtering: 75430
 
 Extract and plot coverage data
 
-```{r, cache = TRUE}
+```{r message=FALSE, warning=FALSE, cache= TRUE}
 
 #check the format before running this
 depths_loci<-read.table("./snp_calling/QC/gl_1.2.pos", header = T, sep = "\t")
@@ -1804,7 +1804,7 @@ Estimating covariance matrix
 Using 5 principal components (MAP test)
 
 
-```{r, cache = TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE}
 
 cov_mat<-read.table("./pcangsd/pcangsd.gl_1.3.cov", sep = " ")
 
@@ -1817,9 +1817,14 @@ fish_names =  gsub(".merged", "", filenames$sample)
 
 pc1<-prcomp(cov_mat)
 
+save(pc1, file = "./pcangsd/pca.R")
+
 pc_inds<-as.data.frame(pc1$x)
 row.names(pc_inds)<-fish_names
 pc_inds$pop<-gsub("_\\d+", "", fish_names)
+
+# write.table(pc_inds, file = "./pcangsd/pca.txt", quote = FALSE) #commented to avoid overwriting, run if doing first run through analysis
+
 
 #caution this deletes al nbh pops except nbh, fix later
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
@@ -1926,7 +1931,7 @@ format data for clumpak
 
 ```
  
-```{r}
+```{r, eval = FALSE}
 
 
 logs <- as.data.frame(read.table("./ngs_admix/logfile_likelihoods.txt"))
@@ -1997,8 +2002,209 @@ __SAF 1 big population__
 
 ### 2d SFS
 
-### FST and per site summary stats
+### global FST   
+
+### Per site summary stats  
+
+# Landscape Genetics
+
+```{r message=FALSE, warning=FALSE}
+require(vegan)
+require(ade4)
+require(adespatial)
+require(SoDA)
+require(marmap)
+```
+
+
+## spatial and environmental data
+
+__distances__  
+rather than using distance matrices based on latitude and longitude, we make a more biologically relevant model where spatial distances among populations is determined by connections via shallow water <5 meters) this is accomplished via the marmap package in R
+
+```{r map, message=FALSE, warning=FALSE, cache=TRUE}
+atlantic <- getNOAA.bathy(lon1 = -83, lon2 = -65, lat1 = 28, lat2 = 48, resolution = 1)
+blues <- c("lightsteelblue4", "lightsteelblue3", "lightsteelblue2", "lightsteelblue1")
+greys <- c(grey(0.6), grey(0.93), grey(0.99))
+plot(atlantic, image = TRUE, land = TRUE, lwd = 0.03, bpal = list(c(0, max(atlantic), greys),c(min(atlantic), 0, blues)))
+#sites<-read.table("~/Science/fundulus_clinal/cline/environmental/lat_lon2.txt", header=T)
+sites<-read.table("./environmental/bathy_sites.txt", header = T, sep = "\t")
+#remove braytonpt and oc
+#sites3<-sites2[c(-7,-11),]
+#row.names(sites)<-sites[,1]
+#sites<-sites[,-1]
+#sites2<-sites
+#sites2[,1]<-sites[,2]
+#sites2[,2]<-sites[,1]
+trans<-trans.mat(atlantic, min.depth=1 , max.depth=-15)
+path <- lc.dist(trans, sites[,c(3,2)], res = "path")
+#distance_matrix <- lc.dist(trans, sites[,c(3,2)], res = "dist")
+points(sites[,c(3,2)], pch = 21, col = "blue", bg = col2alpha("blue", .9),cex = 1.2)
+lapply(path, lines, col = "orange", lwd = 2, lty = 1)->dummy
+#get.depth(atlantic, sites[,c(3,2)]	, locator = FALSE)
+
+#distance_matrix
+
+```
+
+
+```{r, cache = TRUE}
+#prep site data for dbmem
+  #merge all NBH inds to a single pop and convert to all caps
+pops <- pops %>%  
+  mutate(pop = as.character(pop)) %>%
+  mutate(pop = replace(pop, pop == "F", "NBH")) %>%
+  mutate(pop = replace(pop, pop == "P" , "NBH")) %>%
+  mutate(pop = replace(pop, pop ==  "Syc" , "NBH")) %>%
+  mutate(pop = replace(pop, pop ==  "H", "NBH")) %>%
+  mutate(pop = replace(pop, pop == "Mg", "MG")) %>%
+  mutate(pop = replace(pop, pop == "Hb", "HB"))
+
+
+ind_sites <- pops %>%
+  left_join(., sites, by = "pop")
+
+distance_matrix <- lc.dist(trans, ind_sites[,c(4,3)], res = "dist")
+
+#calculate dbmem and plot
+dbmem_pos<-dbmem(distance_matrix, MEM.autocor = "positive")
+
+plot(attributes(dbmem_pos)$values)
+abline(h = 0)
+
+
+
+```
+
+The first 8 dbmems have vaules above 0 (i.e describe spatial autocorrelation)
 
 
 
 
+__temperatures__  
+
+The environmental data is daily SSTs (NOAA OI SST V2 High Resolution Dataset) from 
+
+We extracted 10 years of daily optimum interpolated sea surface temperatures
+(OISSTs) from NOAA/OAR/ESRL PSD (Reynolds et al. 2007) for each of the sampling
+locations and calculated three derived environmental variables: mean temperature, mean
+annual minimum and mean annual maximum (table 5.1, fig. 5.1). The first principal
+component in a principal component analysis captured 90.1% of the variance among
+these variables, and all three variables were highly correlated as indicated by the biplot
+(supplementary fig. 5.1). While mean temperature and mean annual maximum
+demonstrate a linear relationship with latitude (R2 = 0.87 and 0.97; slope = -0.97 and -
+128
+1.1°C per ° latitude, respectively), minimum temperature is constrained by the freezing
+temperature of seawater and plateaued beyond 39 degrees of latitude. The value of the
+first temperature principal component and position along the shore for the sampling
+locations are also strongly correlated (R2 = 0.94, p < 10-9 ANOVA)
+
+```{r env full}
+
+#env variable for pops
+env<-read.table("./environmental/temp_summary.txt", sep = "\t", header = T)
+env <- env %>%
+  left_join(., pops, by = "pop")
+
+```
+
+## genetic data
+
+We use the covariance matrix calculated by PCANGSD to conduct a PCA that describes the genetic variation among samples. Then choose the number of PCs to retain using the Kaiser Guttman criteria
+
+```{r snp pca, cache = TRUE}
+#pca
+#to load pca: attach("./pcangsd/pca.r")
+#snp_pca<-read.table("./pcangsd/pca.txt", header = T, sep= "\t")
+
+#kaiser guttman
+cutoff<-mean(pc1$sdev^2)
+kg <- length((pc1$sdev^2)[(pc1$sdev^2)>cutoff])
+
+#pcs to keep
+snp_pcs <- pc1$x[,c(1:103)]
+
+```
+
+We keep the first `kg` pcs to fit our RDA on
+
+## RDA
+
+Finally we get to running the RDA. We conduct a global RDA, an RDA for the temperature once conditioned on spatial data, and an RDA on the genetic DATA + spatial data once conditioned on the temperature. then we do model selection, significance testing and variance partitioning
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+#global rda
+rda_null <- rda(snp_pcs ~ 1)
+rda_ind<-rda(snp_pcs ~ as.matrix(env[,c(2)]) +as.matrix(env[,c(3)])  + as.matrix(env[,4]) +   (as.matrix(dbmem_pos[,1])) + (as.matrix(dbmem_pos[,2])) + (as.matrix(dbmem_pos[,3])) + (as.matrix(dbmem_pos[,4]))+ (as.matrix(dbmem_pos[,5])) + (as.matrix(dbmem_pos[,6])) + (as.matrix(dbmem_pos[,7])) + (as.matrix(dbmem_pos[,8])))
+
+#variable selection
+ordi <- ordistep(rda_null, scope = formula(rda_ind))
+ordi$anova
+
+#variance partitioning
+vp <- varpart(snp_pcs ,as.matrix(env[,c(2,3,4)]) , (as.matrix(dbmem_pos)[,c(1:8)]))
+
+#controlling for spatial autocor
+rda_ind_con_spatial<-rda(snp_pcs ~ as.matrix(env[,c(2)]) + Condition((as.matrix(dbmem_pos)[,c(1:8)])))
+
+#controlling for temp
+rda_ind_con_temp<-rda(snp_pcs ~ Condition(as.matrix(env[,c(2)])) + (as.matrix(dbmem_pos)[,c(1:8)]))
+
+#anovas
+aov_global <- anova(rda_ind)
+aov_con_spatial <- anova(rda_ind_con_spatial) 
+aov_con_temp <- anova(rda_ind_con_temp)
+
+
+```
+
+
+__RDA Results Summary__
+
+This is a preliminary summary, more detailed results are to come.
+
+
+We used the ordiR2step function to select our model. Using forward selection the full model was chosen (8 dbMEMs describing spatial autocorrelation and 3 environmental summary variables (mean temperature mean annual minimum, and mean annual maximum)). 
+
+Three RDAs were fit and tested for significance:  
+* global RDA - both the effect of spatial autocorrelation (the dbMEMs) and the effect of temerpature  - p < 0.001  
+* RDA of temperature effect, conditioned on spatial autocorrelation - p < 0.001 
+* RDA of spatial effect conditioned on temperature - p < 0.001
+
+Collectively these suggest that there is a significant relationship between the environmental temperature variable and the genetic covariance among samples, once the genetic data is conditioned on the effect of spatial autocorrelation AND vice versa. 76% of the total variation in the genetic dataset (or at least the first 103 of 1371 principal components of it) was constrained by the RDA.
+
+Using the variance partitioning the relative effect of spatial autocorrelation and temperature could be estimated. Adjusted R2 for the effect of temperature, once spatial autocorrelation is accounted for, is 0.4%. In contrast 62% of the genetic dataset was explained by spatial autocorrelation alone. 14% of variation was explained jointly and could not be parsed. 23% was residual.
+
+Examining the triplot suggests that the first dbmem separates northern from southern at the NJ. 
+
+__RDA figures and results tables__
+
+```{r, cache = TRUE}
+#triplot
+rda_sum<-summary(rda_ind)
+scores<-as.data.frame(scores(rda_ind)$sites)
+scores$pop<-pops$pop
+arrows<-as.data.frame(rda_sum$biplot)
+  #order the factors
+scores$pop <- factor( as.character(scores$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "CT", "SR", "BP", "HB",  "NBH", "P", "SLC", "ME", "MDIBL")  )
+ggplot()+geom_point(aes(RDA1, RDA2, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), alpha=0.75, color="red")+geom_text(data=arrows, aes(x=RDA1+0.2, y=RDA2, label=c("Max Temp", "Min Temp", "Mean Temp", "dbMEM1", "dbMEM2","dbMEM3","dbMEM4","dbMEM5", "dbMEM6","dbMEM7", "dbMEM8")), size = 5, vjust=1, color="red")+theme_bw()
+
+
+rda_ind
+aov_global
+
+rda_ind_con_spatial
+aov_con_spatial 
+
+rda_ind_con_temp
+aov_con_temp 
+
+
+
+```
+
+
+
+__notes for going forward__   
+* it might be innappropirate to conduct anovas of rda condition on the combined environmental or dbmem matrices, it may be neccessary to indivudally test each variable, consitioned on all other variables... read into this before proceeding  
+* if we conduct the RDA on all pcs (not just those exceeding the kaiser guttman criteria) we can relate the RDA results more clearly to FST, i.e. we can see how much of the total variation among the cline is explained by RDA and compare this to results from amova and so on

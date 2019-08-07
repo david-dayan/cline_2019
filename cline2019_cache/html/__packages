@@ -5,3 +5,16 @@ DiagrammeR
 dplyr
 plotly
 stringr
+tidyverse
+tibble
+tidyr
+readr
+purrr
+forcats
+permute
+lattice
+vegan
+ade4
+adespatial
+SoDA
+marmap
