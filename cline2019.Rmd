@@ -2139,7 +2139,7 @@ rda_ind<-rda(snp_pcs ~ as.matrix(env[,c(2)]) +as.matrix(env[,c(3)])  + as.matrix
 
 #variable selection
 ordi <- ordistep(rda_null, scope = formula(rda_ind))
-ordi$anova
+#ordi$anova
 
 #variance partitioning
 vp <- varpart(snp_pcs ,as.matrix(env[,c(2,3,4)]) , (as.matrix(dbmem_pos)[,c(1:8)]))
