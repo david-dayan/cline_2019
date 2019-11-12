@@ -5,6 +5,8 @@ output:
     df_print: paged
     code_folding: hide
     toc: true
+    toc_float: true
+    toc_collapsed: false
 ---
 
 ```{r packages, message=FALSE, warning=FALSE, include=FALSE}
@@ -14,12 +16,20 @@ require(DiagrammeR)
 require(dplyr)
 require(plotly)
 require(stringr)
+require(psych)
 
 ```
 
 
-__Summary:__  
-Analysis log for clinal fundulus project
+__Document Summary:__  
+This is an R notebook for the _Fundulus heteroclitus_ clinal genetics analysis.
+
+Top level summaries of methods and results are given in the main text. More detailed explanatation of each step are provided as comments in a header or footer within each code chunk.
+
+Code chunks in R, python and bash are generally run locally, while shell scripts are nearly always run remotely on the Clark University high performance computing cluster.
+
+__Project Rationale:__  
+Combine raw data from all _F. heteroclitus_ GBS sequencing projects in the Oleksiak/Crawford lab into a single genotyping run. Then use these data to describe the population genetic structure of the entire _F. heteroclitus_ species range and to parse adaptive genetic variation from neutral structure owing to secondary reconcact or isolation by distance.  
 
 ## Analysis Outline  
 
@@ -55,13 +65,34 @@ grViz("digraph flowchart {
 
 
 ```
+__Sequencing and Genotyping__
+Genotyping by sequencing libraries are produced according to Elshire et al 2011 and sequenced usig Illumina HiSeq. After initial quality control, the reads are cleaned and assigned to individual fish using the process_radtags fork of STACKS. The cleaned reads are mapped to the _Fundulus heteroclitus_ genome using BWA-MEM. The resulting BAM files are then used as input to calculate genotype likelihoods in ANGSD. 
 
+__Population Genetics__
+All population genetic analysis is conducted from the genotype likelihoods. A summary of these methods are available [in the relevant section below](#angsd-link) 
 
 ## Data description and QC
 
-### sequence data 
+### Populations and Sites
 
-The clinal dataset is composed of 9 lanes of HiSeq2500 run in SE100. These reads include 1478 individuals from 5 separate experiments plus and additional set of lanes used for undersampled regions (CT, NC, SC and ME). 
+__Samples__
+```{r}
+sites<-read.table("./sites/sites.txt", header = T, sep = "\t")
+kable(sites)
+```
+
+```{r}
+#chunk to pull map
+```
+
+
+### Sequence Data Description and Challenges
+
+The clinal dataset is composed of 9 lanes of HiSeq2500 run in SE100. These reads cover 1478 individuals gathered from 5 separate experiments and an additional set of sequencing libraries used for regions undersampled in the previous experiments (CT, NC, SC and ME). All lanes use the same cut sites but vary in depth and quality of library preparation (some libraries were made from very old samples).  
+
+This variation in sequencing depth and quality produced serious issues when calling genotypes using TASSEL. Given the nature of combining experiments into a new analysis, populations were not distributed across unique library preparation and sequncing runs leading to variation in sequencing depth confounded with population. There was a strong inverse correlation between population-level sequencing depth and observed heterozygosity, suggesting that heterozygotes were falsely called as homozygotes in undersampled populations. To ameliorate the variation in library prep and sample quality, this analysis does not rely on called genotypes. Instead we use ANGSD to generate genotype-likelihoods and use these likelihoods to conduct all downstream analyses.
+
+Other atypical challenges associated with this dataset are the inclusion of the sister species _F. grandis_ in the seqeuncing data and unequal sampling across space and (potentially) lineages.
 
 __Lane names:__
 
@@ -75,14 +106,11 @@ H9WYGADXX_2
 HMMKLADXX_1
 HMMKLADXX_2
 
-__Samples__
-```{r}
-sites<-read.table("./sites/sites.txt", header = T, sep = "\t")
-kable(sites)
-```
 
 
 #### QC reports
+
+Here we run sequencing-level QC reports for each lane using fastqc before beginning the analysis
 
 ```{bash, eval = FALSE}
 
@@ -132,30 +160,29 @@ done
 
 ```
 
-fastqc looks good
+FastQC reports look good for all lanes. 
 
 
 ## Demultiplex and Read Filtering
 
-We will use ANGSD to create population level allele frequency estimates rather than call indiviudal genotypes. The input files for ANGSD of indivudal level BAM files. Therefore the first step after QC check is to demultiplex, remove low quality reads and trim adapter and barcode sequences. Ths is accomplished with the process_radtags program from stacks v2.3.
+We will use ANGSD to create population level allele frequency estimates rather than call indiviudal genotypes. The input files for ANGSD are indivudal level BAM files. Therefore the first step after fastQC check is to demultiplex (assign reads to an individual), remove low quality reads and trim adapter and barcode sequences. Ths is accomplished with the process_radtags program from stacks v2.3
 
-### generate barcodes
+### Generate Barcodes
 
-Barcode keys (files used to demultiplex sequence data) are a bit complex given that some fish are sequenced twice and stacks requires each lane be run separately through process radtags. The solution is to give duplicate fish a unique ID suffix, but with a shared prefix, then cleaned demultiplexed reads from each fish in each lane are combined with their additional reads using prefix matching.
+Barcode keys (files used to demultiplex sequence data) are a bit complex given that some fish are sequenced twice and stacks requires each lane be run separately through process_radtags. The solution taken here is to give duplicate fish a unique ID suffix, but with a shared prefix, then cleaned, demultiplexed reads from each fish in each lane are combined with their additional reads using prefix matching.
 
-make new fish_ids, based on only population and library prep id, then mark duplicates (duplicate fish_ids occur because some individual fish are sequenced twice i.e. in different lanes)
 
 ```{r, eval = F}
+#Here we make new fish_ids, based on only population and library prep id, then mark duplicates (duplicate fish_ids occur because some individual fish are sequenced twice i.e. in different lanes)
+
 barcodes<-read.table("./snp_calling/barcode_keys/cline_barcode_key.txt", sep = "\t", header = T)
 tmp<-paste(barcodes$Pop , "_", barcodes$LibraryPrepID, sep = "")
 barcodes$fish_id<-make.names(tmp, unique = TRUE)
 write.csv(barcodes, row.names = FALSE, file = "./snp_calling/barcode_keys/cline_barcode_key.csv", quote = FALSE)
 ```
 
-
-used python script on hand for slightly different format: create a unique single variable for sequencing lane (i.e. colbind flowcell and lane with a _) then run python script below
-
 ```{python barcode_splitter, python.reticulate = FALSE, eval = FALSE}
+# used python script on hand for slightly different format: create a unique single variable for sequencing lane (i.e. colbind flowcell and lane with a _) then run python script below
 
 """ The input file has four columns, this script takes writes columns 2 and 3 (barcode and individual) to a new file based on the value of column 4."""
 
@@ -181,9 +208,8 @@ with open('./snp_calling/barcode_keys/cline_barcode_key.csv') as fin:
 
 ```
 
-oops, only meant to keep barcode and sample id and need to write to tab delimited file
-
 ```{bash, eval = FALSE}
+# Oops, only meant to keep barcode and sample id and need to write to tab delimited file instead. 
 
 for i in ./snp_calling/barcode_keys/*csv
 do
@@ -199,22 +225,21 @@ done
 
 ```
 
-clean up directory
-
 ```{bash, eval = FALSE}
+#clean up directory
 rm ./snp_calling/barcode_keys/*.tmp
 rm ./snp_calling/barcode_keys/*[12]_key.csv
 ```
 
-remove first line from all files
 ```{bash, eval = FALSE}
+#remove first line from all files
 sed -i -e "1d" ./meta_data/*_barcodes.txt
 ```
 
 
 ### process_radtags
 
-Here we clean and demulitplex the reads. 
+Here we filter and demultiplex the reads using stacks process_radtags
 
 __process radtags options:__  
 
@@ -224,7 +249,7 @@ __process radtags options:__
 -r rescue barcodes  
 --inline-null barcodes inline  
 -e aseI  
---adapter-1 trim adapter sequence (used AGATCGGAAGAGCCGTTCAGCAGGAATGCCGAGACCGATCTCG (common adapter from elshire))  
+--adapter-1 trim adapter sequence (used AGATCGGAAGAGCCGTTCAGCAGGAATGCCGAGACCGATCTCG (common adapter from Elshire et al 2011))  
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -250,8 +275,9 @@ __process radtags options:__
 
 source /opt/stacks-2.3/bin/source_me
 /opt/stacks-2.3/bin/process_radtags -f ./seqdata/HMMKLADXX_2_fastq.gz -b ./meta_data/HMMKLADXX_2_key_barcodes.txt -o ./cleaned_tags -e aseI --inline-null -c -q -r --adapter-1 AGATCGGAAGAGCCGTTCAGCAGGAATGCCGAGACCGATCTCG  &> ./cleaned_tags/pr_library_HMMKLADXX_2.oe
-```
 
+#this script is called for each lane - not include in R notebook
+```
 
 __Summary of process radtags:__  
 
@@ -338,11 +364,10 @@ HMMKLADXX_2
 5,258,975     low quality read drops (0.4%)  
 75,209,644    RAD cutsite not found drops (5.8%)  
 1,140,446,245 retained reads (88.3%)  
-  
 
 **combine duplicate cleaned tags**  
 
-Here we concatenate fastq files from fish with reads across multiple lanes
+Here we concatenate fastq files from fish with reads across multiple lanes based on prefix mathcing. 
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -869,15 +894,15 @@ for i in $prefixes; do rm "$i".fq.gz; rm "$i".1.fq.gz; done
 
 ```
 
-
 ## Read Mapping    
+
+Now that all reads have been demultiplexed and cleaned, and duplicate sequencing runs for indivudals have been merged, we align to the _F. heteroclitus genome_ and save results as individual level BAM files.
 
 __Summary__   
 
-  - Downloaded genome v3.0.2 from ENSEMBL  
+  - downloaded genome v3.0.2 from ENSEMBL  
   - indexed with bwa  
   - aligned all reads to f_het genome using bwa-mem and default options  
-
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -913,6 +938,8 @@ done
 
 #### BAM stats
 
+Next is a QC check on the mapping process. 
+
 What are the depths of mapped reads (from bam files)?  
 
 ```{bash, eval = FALSE}
@@ -947,24 +974,17 @@ done
 ```
 
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, fig.cap="Read Mapping Fig. 1: Mean depth at mapped reads in BAM file- averaged across mapping locus and individual"}
 bam_depths<-read.table("./snp_calling/QC/depths.txt", sep = " ")
 bam_depths<-bam_depths[,-c(1,3)]
 colnames(bam_depths)<-c("fish_id", "depth")
-ggplot(data = bam_depths)+geom_density(aes(x = depth))+labs(title = "mean depth at mapped reads (bam) over all samples", x = "depth", y = "frequency")
+ggplot(data = bam_depths)+geom_density(aes(x = depth))+labs( x = "Sequencing depth", y = "Density")
 
 #we could also easily split up the depth file here to look at population level variation in depth
 ```
+Most individuals have greater than 10x sampling depth on average across all loci. 
 
-```{r}
-
-
-
-```
-
-
-
-let's also look at overall number mapped reads per sample  
+However, the number of mapped loci may vary across individuals, so let's also look at overall number mapped reads per sample for a better idea of the distribution of reads per individual in the dataset.
 ```{bash, eval = FALSE}
 #!/bin/bash
 
@@ -995,31 +1015,37 @@ done
 
 ```
 
-```{r message=FALSE, warning=FALSE, cache=TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap="Read Mapping Fig. 2: Total number of reads per individual"}
 
 mapped_reads<-read.table("./snp_calling/QC/mapped_reads.txt", sep = " ")
-ggplot(data = mapped_reads)+geom_histogram(aes(x = log10(mapped_reads[,1])))+labs(title =  " mapped reads in bam files", x = "log10 reads")
+ggplot(data = mapped_reads)+geom_histogram(aes(x = log10(mapped_reads[,1])))+labs(x = "log10 reads")
 
 ```
 
+_Read Mapping fig 2._ highlights the need for an genotype likelihood based approach. Even excluding outlier individuals, the sampling depth varies 20-50 fold among samples. This figure also shows that _Read Mapping fig. 1_ is misleading. The reason for similarity in read depth depicted _Read Mapping fig. 1_ might be because of dropout of loci in individuals with low depth. Also of note is the roughly 5% of individuals with extremely poor coverage (less than ~50000 reads)
 
-__grandis__
+__F. grandis__
 
-keeping grandis in the analysis may be useful to reconstruct the ancestral state of the genome and therefore create an unfolded SFS, but how well do the grandis reads align to the fundulus reference genome, let's compare the bam files:
+Keeping grandis in the analysis may be useful to reconstruct the ancestral state of the genome and therefore create an unfolded site frequency spectrum (SFS), but first we need to rationalize maintaining them in the genotyping run.  
 
-```{r message=FALSE, warning=FALSE}
+How well do the grandis reads align to the fundulus reference genome? Let's compare the bam files:
+
+```{r message=FALSE, warning=FALSE, fig.cap="Read Mapping Fig. 3: Total number of reads (log10) for F. heteroclitus (black) vs F. grandis"}
 
 colnames(mapped_reads) <- c("reads", "sample")
 mapped_reads$pop<-str_extract(mapped_reads$sample, "[^_]+")
-mapped_reads %>%
-  group_by(pop) %>%
-  summarize(mean = mean(reads), sd = sd(reads), n = n())
+#mapped_reads %>%
+#  group_by(pop) %>%
+#  summarize(mean = mean(reads), sd = sd(reads), n = n())
+# can uncomment this if a reviewer wants this picture of the variation later
 
-ggplot()+geom_density(data = mapped_reads[(mapped_reads$pop!="grandis"),],aes(x=reads))+geom_density(data = mapped_reads[(mapped_reads$pop=="grandis"),],aes(x=reads), color = "red")+labs(title = "total number mapped reads", subtitle = "red - grandis ; black - heteroclitus")  
+ggplot()+geom_density(data = mapped_reads[(mapped_reads$pop!="grandis"),],aes(x=log10(reads)))+geom_density(data = mapped_reads[(mapped_reads$pop=="grandis"),],aes(x=log10(reads)), color = "red") + labs(x = "Log10 Reads") 
  
 ```
 
-this isn't ideal though, lets try to figure out the PROPORTION of reads mapped to the reference genome
+This looks great, a similar number of reads map to the genome regardless of the species the reads originate from. This suggests that BWA-mem can tolerate the mismatches owing to species level variation well enough to map the reads. 
+
+this isn't ideal though, lets try to figure out the proportion of reads successfully mapped to the reference genome
 
 
 ```{bash, eval = FALSE}
@@ -1049,22 +1075,32 @@ do
 { $samtools view -c -F 0 $i; echo ${i%.bam} ; } | tr "\n" " " >> total_reads.txt
 done
 
+#this script pulls the totla reads (not mapped reads) form the bam files using the samtools bitset flag 0
+#needed to fix this output quickly using regex -replaced every second space with a linebreak
 ```
 
-```{r, cache = TRUE}
-
-#total_reads <- read.table("./snp_calling/QC/total_reads.txt", sep = " ")
+```{r, message=FALSE, warning=FALSE, cache=TRUE, fig.cap="Read Mapping Fig. 4: Total proportion of mapped reads (log10) for F. heteroclitus (black) vs F. grandis"}
+#make new dataframe for proportion of reads and plot
+total_reads <- read.table("./snp_calling/QC/total_reads.txt", sep = " ")
 # make column of total reads, then proportion reads, plot again
+colnames(total_reads) <- c( "total", "sample")
+mapped_reads <- cbind(mapped_reads, total_reads$total)
+colnames(mapped_reads)[4] <- c("total_reads")
 
+mapped_reads$proportion <- mapped_reads$reads/mapped_reads$total_reads
+
+ggplot()+geom_density(data = mapped_reads[(mapped_reads$pop!="grandis"),],aes(x=log10(proportion)))+geom_density(data = mapped_reads[(mapped_reads$pop=="grandis"),],aes(x=log10(proportion)), color = "red") + labs(x = "Log10 Reads") 
 ```
 
+A similar proportion of reads map regardless of species, suggesting the divergence between the species is not so high that it will cause major issues to include grandis
 
-
-## ANGSD
+## ANGSD {#angsd-link}
+__ANGSD Rationale__  
+ANGSD is used to generate genotype likelihoods from the demultiplexed, filtered reads. 
 
 __ANGSD Analysis outline__
 
-We conduct two sets of ANGSD analyses. The first calculates genotype likelihoods. The second estimates the site frequency spectrum.
+We conduct two sets of ANGSD analyses. The first calculates genotype likelihoods (flowchart below).
 
 ```{r }
 
@@ -1103,7 +1139,14 @@ grViz("digraph flowchart {
       
       ")
 
+```
 
+This analysis produces population level allele frequencies and genotype likelihoods (GLs). These genotype likelihoods are used to calculate linkage disequilibrium, admixture proportions and a genetic coviarance matrix. The covariance matrix is used as the basis for a further population structure analysis (principal component analysis) and a environmental association analysis (redundancy analysis) to parse adaptive from neutral genetic variation.
+
+
+The second ANGSD analysis is a separate project, but briefly summarized here (flowchart below)
+
+```{r}
 grViz("digraph flowchart {
       # node definitions with substituted label text
       node [fontname = Helvetica, shape = rectangle]        
@@ -1138,12 +1181,14 @@ grViz("digraph flowchart {
 
 ```
 
+In this second analysis we calculate site allele frequencies from the genotype likelihoods, then use this SAF to generate site frequency spectra. This SFS can be used for demographic modelling to examine the hypothesis that contemporary _F. heteroclitus_ population genetic structure was shaped by post-glacial secondary recontact between the main population and a northern glacial refugia population. Secondarily, the SFS cna be used to calculate site-wise FST and other site wise stats (theta and Tajima's D) and may be included in the main analysis if an outlier approach to identifying adaptive genetic variation is desirable.
 
 
-### set up
+### Set up
+
+In this section we set up file directories, create metadata files and manipulate input files for the ANGSD run.
 
 Create lists of bams for all the separate populations
-
 ```{bash, eval = FALSE}
 
 #in server directory containing bams
@@ -1175,8 +1220,7 @@ find "$(cd ..; pwd)" -iname "grandis_*bam" > ../grandis.bams
 cat *bams > ALL.bamlist
 ```
 
-
-first compress the genome and create a compression index 
+Compress the genome and create a compression index 
 ```{bash, eval = FALSE}
 #!/bin/bash
 
@@ -1203,12 +1247,12 @@ source /opt/samtools-1.6/source_me
 
 ```
 
-then create a samtools index
+Create a samtools index
 ```{bash, eval = FALSE}
 samtools faidx f_het_genome_3.0.2.fa.gz
 ```
 
-also need to index all the bam files
+Index all the bam files
 ```{bash, eval = FALSE}
 #!/bin/bash
 
@@ -1238,13 +1282,16 @@ for i in ./*.bam;do $samtools index $i;done
 ```
 
 
+### ANGSD Exploratory Data Analysis
 
-### EDA
+In this section we conduct an exploratory data analysis to explore site coverage and the sensitivity of ANGSD to site-filtering parameters.
 
-#### coverage eda
-First lets take a look at coverage and allele freqeuncy to get an idea what the data looks like prior to filtering
+#### Coverage EDA
 
-rationale for options:  
+First lets take a look at coverage and allele freqeuncy to get an idea what the data looks like prior to filtering. This first ANGSD run does not estimate genotype likelihoods, instead it only collects the distribution of quality scores and read counts. 
+
+__ANGSD options:__  
+
   __command options__    
  -P 10: use 10 threads  
  -ref: path to reference genome  
@@ -1257,12 +1304,11 @@ rationale for options:
  -C exclude reads with excessive mismatches  
  -baq avoid SNPs called due to indels  
  -minmapQ exclude reads with poor mapping  
- -maxDepth - r)ead depth above this level are binned (set high to llok at actual depth distrubution  
+ -maxDepth - read depth above this level are binned (set high at this point to look at actual depth distrubution)  
  __dos__  
- doqsdist calulates distribution of quality scores of used reads  
- dodepth calculates distrubtion of read depths  
- docounts needed for depth calcuation    
-
+ doQsdist - calulates distribution of quality scores of used reads  
+ doDepth - calculates distrubtion of read depths  
+ doCounts - needed for depth calcuation    
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -1294,28 +1340,30 @@ $ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc \
 ```
 
 
+**Results of initial ANGSD run**
 
-**results of initial ANGSD run**
-Q scores and global depth 
-```{r message=FALSE, warning=FALSE, cache= TRUE}
+Q scores and global depth: 
+```{r message=FALSE, warning=FALSE, cache= TRUE, fig.margin = TRUE}
 ## barplot q-scores
 qs <- read.table(file = "./snp_calling/ANGSD_outputs/qc_check/ALL.qc.qs", head=T, stringsAsFactors=F)
 barplot(height=qs$counts, names.arg=qs$qscore, xlab="Q-score", ylab="Counts", main = "Q-score distribution")
+```
 
+ 
+```{r message=FALSE, warning=FALSE, cache= TRUE, out.width=c('50%', '50%'), fig.align='center', fig.show='hold', fig.cap="EDA Fig. 2: Total number of reads (across all indivuals) per site. Right plot is subset of main plot"}
 ## global depth
 dep <- as.numeric(scan(file = "./snp_calling/ANGSD_outputs/qc_check/ALL.qc.depthGlobal",what="char", quiet=T))
 dep_freq<-as.data.frame(cbind(dep, seq(1:length(dep))))
 colnames(dep_freq)<-c("count", "depth")
 dep_freq$depth<-dep_freq$depth-1
-ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "global depths (summed across all fish)")
-ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "subset of plot above")+xlim(0, 100)
+ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")
+ggplot(data = dep_freq, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(0, 100)
 ```
 
 
+```{r, warning=FALSE, cache=TRUE, include=FALSE}
+#__Depths for a handful of individuals:__  
 
-
-__Depths for a handful of individuals:__  
-```{r, warning=FALSE, cache=TRUE}
 ## individual depth
 idep<-read.table("./snp_calling/ANGSD_outputs/qc_check/ALL.qc.depthSample")
 #look at read depth histogram for the first tenindividual
@@ -1339,14 +1387,17 @@ ggplot(data = i200, aes(depth, log10count))+geom_bar(stat = "identity")+labs(x =
 
 ```
 
-**other salient results**
-Total number of sites analyzed: 567547
+**other salient results from outputs**  
+Total number of sites analyzed: 567547  
 Number of sites retained after filtering: 559561
 
-thoughts here:
-  - most sites have very limited depth, with 1480 samples, the global depth is largely less than 1000  
-  - 59000 sites (about 10%) have more than 1000 reads, are these driven by a moderate depth in a lot of individuals or extremely high depth in just a few?  
-  - lets run this again but only retain sites present in 80% of individuals
+__Initial EDA conclusions from these figures:__  
+  - Quality scores are high: this is no surprise, as the raw input data also had high quality scores  
+  - Most sites have very limited depth: with 1480 samples, the global depth is largely less than 1000   
+  - 59000 sites (about 10%) have more than 1000 reads, the next step is to check whether these are driven by a moderate depth in a lot of individuals or extremely high depth in just a few?  
+
+__Coverage EDA continued__  
+This time, we do some standard filtering: only retain sites present in 80% of individuals.
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -1375,46 +1426,14 @@ $ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc -r KN81
   -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -maxDepth 1000 -minInd 1184 \
 	-minMapQ 20 -doQsDist 1 -doDepth 1 -doCounts 1
 
+#to speed things up we just run on one chromosome (the -r option), but this produced no sites, so ran again with full genome
 ```
 
-no sites were retained with this level of filtering,
-lets scale up to the ful genome and see how many sites with coverage in 80% of individuals we get: 2702 sites ... 
+There were only 2,702 sites with coverage in at least 80% of individuals (and met other filtering criteria).
+This roughly aligns with the results using other genotyping pipelines (i.e. stacks and Tassel), which each found around 2-10k loci depending on filtering parameters. A question to consider down the road in the EDA is whether this is driven my poor coverage overall, dropout of sites, or the number of poorly sequenced individuals approaching 20%. Will examine this further below.
 
-this ANGSD output is very sparse, how many loci are these sites spread across? how many reads are they based on before and after filtering? what are the mapping qualities? why is the depth data presented in the least convenient imaginable format? I miss stacks and tassel...
-
-lets try again but a little less stringent, here we retain sites with coverage in 70% of fundulus heterociltis in the dataset (1010), 
-
-```{bash, eval = FALSE}
-#!/bin/bash
-
-# set max wall-clock time (D-HH:MM:SS)
-#SBATCH --time=0-23:59:00
-
-#SBATCH --cpus-per-task=10
-
-# set partition/queue to use
-#SBATCH --partition=day-long-cpu
-
-# set name of job
-#SBATCH --job-name=angsd_0.7
-
-# set name of output file
-#SBATCH --output=angsd_0.7.out
-
-
-ANGSD="/opt/angsd0.928/angsd/angsd"
-REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
-
-$ANGSD -P 10 -b ../meta_data/ALL.bamlist -ref $REF -out ./Results/ALL.qc -r KN811289.1 \
-  -uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -minInd 1010 \
-	-minMapQ 20
-```
-
-
-how many loci is this over? we can use gatk countloci for this
-
-prep:
-```{bash, eval = FALSE}
+```{bash, eval = FALSE, include = FALSE}
+#how many loci is this over? we can use gatk countloci for this
 
 GATK="/opt/java/jdk1.8.0_121/bin/java -jar /opt/Gatk/GenomeAnalysisTK.jar"
 
@@ -1433,11 +1452,9 @@ $GATK -T CountLoci -R f_het_genome_3.0.2.fa -I ../aligned/OC_421.merged.bam
 
 ```
 
-  
+#### Genotype-Likelihood EDA (gl_0.1)
 
-#### gl EDA (gl_0.1)
-
-Here we're going to finally run ANGSD
+Here we're going to finally run ANGSD to estimate genotype likelihoods. All outputs use the prefix gl_0.1.
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -1474,20 +1491,20 @@ Total number of sites analyzed: 80148766
 Number of sites retained after filtering: 62571
 
 __Coverage__
-```{r message=FALSE, warning=FALSE, cache=TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap="EDA Fig. 3: ", include = FALSE}
 ## global depth
 dep <- as.numeric(scan(file = "./snp_calling/ANGSD_outputs/run_0.1//ALL.qc.depthGlobal",what="char", quiet=T))
 dep_freq<-as.data.frame(cbind(dep, seq(1:length(dep))))
 colnames(dep_freq)<-c("count", "depth")
 dep_freq$depth<-dep_freq$depth-1
 dep_freq$log_count<-log10(dep_freq$count)
-ggplot(data = dep_freq, aes(depth, log_count))+geom_bar(stat = "identity")+labs(x = "Depth", title = "global depths (summed across all fish)")
+ggplot(data = dep_freq, aes(depth, log_count))+geom_bar(stat = "identity")+labs(x = "Depth", y = "Log10 Count")
 ```
 
+Of the 62571 sites, 47984 (76%) have more than 14800 (i.e. have more than 10x coverage summed across all individuals)
 
-Of the 62571 sites, 47984 (76%) have more than 14800 reads and show up as a single thin bar at 14800 in this plot
-
-```{r, cache= TRUE}
+Lets take a look at a handful of individual per-site depth distributions:
+```{r, message=FALSE, warning=FALSE, cache= TRUE, fig.show='hold', out.width=c('24%', '24%','24%', '24%' ), fig.align='center'}
 ## individual depth
 idep<-read.table("./snp_calling/ANGSD_outputs/run_0.1/ALL.qc.depthSample")
 #look at read depth histogram for the first tenindividual
@@ -1528,14 +1545,13 @@ colnames(i148)<-c("count", "depth", "log10count")
 ggplot(data = i148, aes(depth, count))+geom_bar(stat = "identity")+labs(x = "Depth")+xlim(c(0,300))+ylim(c(0,3000))+labs(title = "grandis individual")
 ```
  
- 
- if we look at a handful of depth for individual fish (reads per locus per individual) we observe a nice distribution with mostly >20x coverage
- 
+If we look at a handful of depth for individual fish (reads per locus per individual) we observe a nice distribution with mostly >20x coverage
  
 #### PCA eda
 
-a note on installation (code chunk below):  
+Now that we have some genotype likelihoods, it is a good time for a sanity check. We quickly run and plot a PCA on the likelihoods to check if we observe the population genetic structure we expect. 
 
+a note on installation (code chunk below):  
 ```{bash, eval = FALSE}
 
 #didn't want to wait for HPC to install pcangsd so did it locally. the problem (as always) is that pcangsd has depnedinecies that get install to local python but slurm calls a different python. used the tool virtualenv to get around this
@@ -1563,9 +1579,6 @@ deactivate
 
 ```
 
-
-ok now lets try a PCA
-
 ```{bash, eval = FALSE}
 #!/bin/bash
 
@@ -1583,17 +1596,14 @@ ok now lets try a PCA
 # set name of output file
 #SBATCH --output=pcangsd_0.1.out
 
-
-
 source /home/ddayan/software/pcangsd/bin/activate
 python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/ALL_gl_0.1.beagle.gz -o pcangsd.gl_0.1 -threads 38
 
-
 ```
 
-Let's looks at these PCA results
+__Exploratory PCA results__
 
-```{r message=FALSE, warning=FALSE, cache=TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap="Fig EDA PCA 1: Principal component analysis of genetic variation from the exploratory ANGSD run (gl_0.1). Populations colored by latitude."}
 
 cov_mat<-read.table("./pcangsd/pcangsd.gl_0.1.cov", sep = " ")
 
@@ -1606,41 +1616,49 @@ pc_inds<-as.data.frame(pc1$x)
 row.names(pc_inds)<-fish_names
 pc_inds$pop<-gsub("_\\d+", "", fish_names)
 
-#caution this deletes al nbh pops except nbh, fix later
+#caution this deletes al nbh pops except nbh, fix later if we want to keep these outside the eda
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
 
 ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+```
 
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap='Fig EDA PCA2: Principal component analysis of genetic variation from the exploratory ANGSD run (gl_0.1) including 3rd pc. hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document.'}
 plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
 
 ```
 
-hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document
+__Conclusions of EDA PCA__
 
-it looks like there are some QC issues to take on (or a grandis individual is more similar to f het than other grandis), but that this approach is at least working well enough to differentiate pops in PC space
+It looks like there are some QC issues to take on (or a grandis individual is more similar to f het than other grandis), but that this approach is at least working well enough to differentiate pops in PC space. Also, it seems as though PC 1 dominates the PCA (75% of variance) and simply separates _F grandis_ from _F heteroclitus_.  PC2 (15%) separate poulations among the southern clade (south of NJ) while PC3 (3%) separates northern clade populations. 
 
 ### Genotype Likelihoods
 
+This section estimates the final genotype likelihoods using ANGSD.
+
 #### filtering rationale
 
+Below are the rationales underlying the filtering parameters used
+
 __grandis__  
-we will use the grandis reads to create a grandis consensus sequence (dofasta in angsd) which will be used as the ancestral state for unfolded SFS estimation, but we will not estimate genotype likelihoods in grandis as this will influence SNP probabilities and it seems that including grandis dominates the structure found by PCA
+Keeping _F grandis_ in the GL estimation?
+We will use the grandis reads to create a grandis consensus sequence (dofasta in angsd) which will be used as the ancestral state for unfolded SFS estimation, but we will not estimate genotype likelihoods in grandis as this will influence SNP probabilities and it seems that including grandis dominates the structure found by PCA.
+There is also evidence from the PCA that a grandis individual was mislabeled in the field as a GA fish. This should be filtered out.
 
+__Hardy Weinberg Equilibrium__  
+No HWE filtering, filtering out paralogues by using excess coverage instead - rationale here is that HWE is likely to be skewed given the amount of population strcutre in the sample and that filtering by HWE stratified by population is not possible in the ANGSD pipeline  
 
-__HWE__  
-no HWE filtering, filtering out paralogues by using excess coverage instead - rationale here is that HWE is likely to be skewed given the amount of population strcutre in the sample and that filtering by HWE stratified by population is not possible in the ANGSD pipeline  
-
-__MAF__  
-MAF filtering will skew the SFS and should not be applied to the methods that rely on SFS (demography inference, FST), but the inclusion of singletons called genotyped datasets can confound STRUCTURE (little effect on multivariate population structure algorithms e.g. PCA DAPC). My assumption is that the use of genotype likelihoods instead of called genotypes should reduce the impact of singletons or low frequency alleles (erroneous or true) on the inference of structure using model based approaches like STRUCTURE, and the inclusion of rare alleles will improve discrimination among recently diverged populations (or populations with rare gene flow) when using multivariate approaches
+__maf__  
+MAF filtering will skew the SFS and should not be applied to the methods that rely on SFS (demography inference, FST), but the inclusion of singletons called genotyped datasets can confound STRUCTURE (little effect on multivariate population structure algorithms e.g. PCA DAPC). My assumption is that the use of genotype likelihoods instead of called genotypes should reduce the impact of singletons or low frequency alleles (erroneous or true) on the inference of structure using model based approaches like STRUCTURE, and the inclusion of rare alleles will improve discrimination among recently diverged populations (or populations with rare gene flow) when using multivariate approaches. See ANGSD literature for more here.
 
 __max_coverage__  
-will set max coverage at 2.5x the modal coverage per locus, this means will have to run ANGSD again with a higher maxdepth cutoff for the coverage output in order to estimate it...
+Instead of relying on HWE to filter out paralogues we use coverage. 
+Will set max coverage at 2.5x the modal coverage per locus, this means will have to run ANGSD again with a higher maxdepth cutoff for the coverage output in order to estimate it...
 
 __min_coverage_locus__  
-no hard minimum coverage cutoff, instead use stringent snp_pval cutoff and minimum number of individuals (we require that a site be present in 50% of samples - 686)
+No hard minimum coverage cutoff, instead use stringent snp_pval cutoff and minimum number of individuals (we require that a site be present in 50% of samples - 686)
 
 __minimum_coverage_ind__  
-the mean coverage for the individuals (at the bam level) is ~730k, but a handful of individuals have very low coverege (see bam stats section), will remove these individuals BEFORE ANGSD analysis by editing bam_lists, removed individuals in the lowest 5% of the coverage distribution
+The mean coverage for the individuals (at the bam level) is ~730k, but a handful of individuals have very low coverege (see bam stats section), will remove these individuals BEFORE ANGSD analysis by editing bam_lists, removed individuals in the lowest 5% of the coverage distribution
 
 __snp_pval__  
 impose stringent probablility cutoff for reatining a SNP: 1e-6
@@ -1648,14 +1666,18 @@ impose stringent probablility cutoff for reatining a SNP: 1e-6
 __quality_and_mapping__  
 -uniqueOnly 1 -remove_bads 1 -C 50 -baq 1 -skipTriallelic 1  -minMapQ 20
 
+__individuals__
+The EDA also suggests that roughly 5% of individuals have extremely poor coverage, these are removed PRIOR to GL estimation.
 
-#### ANGSD GL Run 1.2x
+#### ANGSD GL Run 1.3x
 
-version history
-1.0 first run
-1.1 removed outlier high coverage
-1.2 start from scratch with mislabeled GA fish removed - GA_3318 clustered with grandis in PC space and also was it's own group in PCA run on genotype likelihoods v1.1
-1.3 coverage filtered output of 1.2
+This section contains final (gl_1.3) genotype likelihood estimation, but a detailed version history and the relevant code is also included below.
+
+__version history__  
+1.0 first run  
+1.1 removed outlier high coverage  
+1.2 start from scratch with mislabeled GA fish removed - GA_3318 clustered with grandis in PC space and also was it's own group in PCA run on genotype likelihoods v1.1  
+1.3 coverage filtered output of 1.2  
 
 Make list of bam files, filtering out grandis and individuals in the lowest 5% of reads: 
 ```{r }
@@ -1675,8 +1697,6 @@ grep -v -f ./snp_calling/QC/bad_inds.txt ./snp_calling/ANGSD_outputs/ALL.bamlist
 ```
 
 This removed all grandis, 72 individuals with too few reads and 1 individual labeled as GA but actually grandis, leaving a final dataset of 1371 individuals.
-
-
 
 Make genotype likelihood estimation v1.2
 ```{bash, eval = FALSE}
@@ -1721,8 +1741,7 @@ Number of sites retained after filtering: 75430
 ### Coverage
 
 Extract and plot coverage data
-
-```{r message=FALSE, warning=FALSE, cache= TRUE}
+```{r message=FALSE, warning=FALSE, cache= TRUE, fig.cap="Depth at loci estimated by ANGSD. Red line is the modal depth, blue line is 2.5X the modal depth"}
 
 #check the format before running this
 depths_loci<-read.table("./snp_calling/QC/gl_1.2.pos", header = T, sep = "\t")
@@ -1738,7 +1757,7 @@ ggplot(data = depths_loci) + geom_histogram(aes(x = totDepth))+xlim(c(0,75000)) 
 
 ```
 
-The modal depth per locus is `modal_depth`. All loci with 2.5x greater read depth are then filtered out.
+The modal depth per locus is `r modal_depth`. All loci with 2.5x greater read depth are then filtered out.
 
 ```{r filter paralogues}
 
@@ -1754,7 +1773,7 @@ sites_to_remove$beagle_id<-paste(sites_to_remove$chr, "_", sites_to_remove$pos, 
 #write.table(sites_to_remove[,c(4)], file = "./snp_calling/QC/sites_to_remove.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
 ```
 
-GL_1.2 had `nrow(depths_loci)` SNPs, after fitlering out SNPs with greater than 2.5x the mode coverage (`modal_depth`x = mode) there are `nrow(sites_to_keep)` SNPs
+GL_1.2 had `r nrow(depths_loci)` SNPs, after fitlering out SNPs with greater than 2.5x the mode coverage (`r modal_depth`x = mode) there are `r nrow(sites_to_keep)` SNPs
 
 ```{bash server filtering, eval = FALSE}
 #filtering the datasets
@@ -1768,7 +1787,10 @@ bgzip gl_1.3.beagle
 
 ## Population Structure 
 
+First final results! This section details the population genetic structure of the species range using PCA (implemented in [PCangsd](http://www.popgen.dk/software/index.php/PCAngsd)) and a bayesian classifier similar to STRUCTURE called [NGS-Admix](http://www.popgen.dk/software/index.php/NgsAdmix).  
+
 ### PCA
+The PCA relies on a covariance matrix estimated by PCangsd from the genotype likelihoods. This Covariance matrix is then subjected to eigen-decomposition to produce the PCA of genetic distance among samples.
 
 ```{bash, eval = FALSE}
 #!/bin/bash
@@ -1794,7 +1816,6 @@ python /home/ddayan/software/pcangsd/pcangsd.py -beagle ../Results/gl_1.3.beagle
 ```
 
 __PCANGSD run info:__  
-
 Read 1371 samples and 73375 sites
 
 Estimating population allele frequencies
@@ -1803,8 +1824,7 @@ EM (MAF) converged at iteration: 12
 Estimating covariance matrix
 Using 5 principal components (MAP test)
 
-
-```{r message=FALSE, warning=FALSE, cache=TRUE}
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap="Results Fig. 1: Principal component analysis of genetic variation. Populations colored by latitude."}
 
 cov_mat<-read.table("./pcangsd/pcangsd.gl_1.3.cov", sep = " ")
 
@@ -1815,11 +1835,11 @@ filenames <- filenames[-c(1372, 1373),]
 
 fish_names =  gsub(".merged", "", filenames$sample)
 
-pc1<-prcomp(cov_mat)
+pc2<-prcomp(cov_mat)
 
-save(pc1, file = "./pcangsd/pca.R")
+save(pc2, file = "./pcangsd/pca2.R")
 
-pc_inds<-as.data.frame(pc1$x)
+pc_inds<-as.data.frame(pc2$x)
 row.names(pc_inds)<-fish_names
 pc_inds$pop<-gsub("_\\d+", "", fish_names)
 
@@ -1830,17 +1850,24 @@ pc_inds$pop<-gsub("_\\d+", "", fish_names)
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
 
 ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
-
-
-plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
 ```
 
-There is 1 outlier fish ("GA_3318"). Given that this fish was caught in Georgia, it is likely a misidentified grandis is needs to be excluded from the analysis. New GL file and all resulting analysis labeled 1.2
+```{r, fig.cap='Results Fig. 2: Principal component analysis of genetic variation, including 3rd pc. hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document.', message=FALSE, warning=FALSE}
+plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
+```
+```{r, fig.cap="Screeplot of PCA", out.width="35%"}
+screeplot(pc2)
+```
+
+
+__PCA Summary__  
+The final PCA corroborates previous descriptions of the _F heteroclitus_ population genetic cluster. There is a break centered at Northern New Jersey between two distinct clusters, within each cluster a pattern of isolation by distance dominates the structure.
 
 ### Admixture
 
-NGSadmix is used to estimate ancestry for K = 1-6 with 10 replicate runs and best k determined by evanno
+NGSadmix is used to estimate ancestry for K = 1-6 with 10 replicate runs and best k determined by the Evanno method (not included in notebook - [online app](http://taylor0.biology.ucla.edu/structureHarvester/)). Run details for publication quality and other other k plotting are in the "ngs_admix" directory. 
 
+Below is a structure plot of the best K according to Evanno method (k=2).
 ```{bash, eval = FALSE}
 #!/bin/bash
 
@@ -1880,8 +1907,8 @@ $NGSadmix -likes $BEAGLE -K $K -o $Out_Prefix.10 -P 10 -minMaf 0
 
 ```
 
-Plot admixture portions for a single run of k = 2
 ```{r message=FALSE, warning=FALSE}
+#Plot admixture portions for a single run of k = 2
 
 #make popfile
 pops<- as.data.frame(cbind(fish_names, gsub("_\\d+", "", fish_names)))
@@ -1923,16 +1950,13 @@ ggplot(plot_data, aes(id, prob, fill = cluster)) +
   facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.01, "lines"), axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position = "none")
 ```
 
-format data for clumpak
-
+Data also formatted for clumpak visualization below
 ```{bash, eval = FALSE}
 
 (for log in `ls *.log`; do grep -Po 'like=\K[^ ]+' $log; done) > logfile
 
 ```
- 
 ```{r, eval = FALSE}
-
 
 logs <- as.data.frame(read.table("./ngs_admix/logfile_likelihoods.txt"))
 logs$K <- c(rep("1", 10), rep("2", 
@@ -1942,9 +1966,262 @@ write.table(logs[, c(2, 1)], "/ngs_admix/logfile_likelihood_formatted.txt", row.
     col.names = F, quote = F)
 ```
 
-delta K method suggest best K is 2, but prob(k) is maximixed at k = 6, therefore will run for more K
+Note - delta K method suggest best K is 2, but prob(k) is maximixed at k = 6, suggesting runs of further K may be neccessary.
+
+__Admixture Results__  
+The STRUCTURE plot above agrees with previous analyses. The primary aspect of population structure is the break north of New Jersey (i.e. best K is 2 and splits into two groups north and south of the Hudson Basin). Also of note on the k=2 plot is the evidence of introgression of northern ancestry into the admixture zone throughout New Jersey (in population SH, RB, OC, and MG). Surprisingly there is some introgression of southern alleles into the southern extremes of the northern population in Connecticut and Rhode Island(CT, and SR)
+
+## Landscape Genetics
+
+```{r message=FALSE, warning=FALSE}
+require(vegan)
+require(ade4)
+require(adespatial)
+require(SoDA)
+require(marmap)
+```
+
+__Rationale:__  
+Here the goal is to use multivariate genotype environmental association analysis to decompose the genetic variation along the cline into adaptive and neutral components, by finding genetic variation that correlates with putatively selective environmental variable after correcting for spatial autocorrellation. We use cRDA - redundancy analyses of components. 
+Redundancy analysis is a multivariate constrained ordination that finds linear combinations of multiple explanatory variables (in this case temperature variation and spatial autocorrelation) that are "redudant with" (or correlate with) linear combinations of the response variable (in this case genetic variation). In our case the response variable is not individual genotypes, but components of genetic variation among individuals - a PCA of the covariance matrix produced by PCangsd. The type of RDA - termed a cRDA - is less powerful than a traditional RDA for finding outlier loci associated with the environmental variable because the individual SNPs must be subsequently identified as those correlated with the significantly constrained axes, i.e. the RDA is on the components of genetic variation not directly on the SNPs. This approach is preferable for our purposes, because (a) we are more interested in identifying the proportion and patterns of polygenic variation that may be due to selection and dempgraphy than identifying the actual SNPs and (b) conducting RDA on SNP level variation ould require calling SNPs rather than relying on genotype probabilities used to calculate the covariance matrix.
+
+The genetic variation (principal components) are modelled as an effect of two sets of variables (1) a spatial variable that capture netural structure owing to isolation by distance and (2) environmental variables with a priori support that they drive adaptive evolution in this species. Further details for these variables appear in the relevant sections below. 
+
+### Spatial and Environmental Data
+
+First we set up the dataset to run the RDA
+
+__Spatial Variables__  
+The spatial variable is a distance bases moran's eigenvector map (db-MEM). DB-MEM is used to decompose the spatial structure into a set of orthoganl eigenfuctions thereby providing better resolution of autocorrelation across spatial scales. 
+
+To calculate the db-MEMs we use a distance matrix based on travel distance among sites. i.e. Rather than using distance matrices based on latitude and longitude, we make a more biologically relevant model where spatial distances among populations is determined by connections via shallow water <15 meters) this is accomplished via the marmap package in R
+
+```{r map, message=FALSE, warning=FALSE, cache=TRUE, fig.cap="Bathymetric map of sampling locations with minimum path between sites constrained by deep water (gold line - 15m)", include=FALSE}
+atlantic <- getNOAA.bathy(lon1 = -83, lon2 = -65, lat1 = 28, lat2 = 48, resolution = 1)
+blues <- c("lightsteelblue4", "lightsteelblue3", "lightsteelblue2", "lightsteelblue1")
+greys <- c(grey(0.6), grey(0.93), grey(0.99))
+#sites<-read.table("~/Science/fundulus_clinal/cline/environmental/lat_lon2.txt", header=T)
+sites<-read.table("./environmental/bathy_sites.txt", header = T, sep = "\t")
+#remove braytonpt and oc
+#sites3<-sites2[c(-7,-11),]
+#row.names(sites)<-sites[,1]
+#sites<-sites[,-1]
+#sites2<-sites
+#sites2[,1]<-sites[,2]
+#sites2[,2]<-sites[,1]
+trans<-trans.mat(atlantic, min.depth=1 , max.depth=-15)
+path <- lc.dist(trans, sites[,c(3,2)], res = "path")
+#distance_matrix <- lc.dist(trans, sites[,c(3,2)], res = "dist")
+
+#get.depth(atlantic, sites[,c(3,2)]	, locator = FALSE)
+
+#distance_matrix
+
+```
+
+```{r}
+plot(atlantic, image = TRUE, land = TRUE, lwd = 0.03, bpal = list(c(0, max(atlantic), greys),c(min(atlantic), 0, blues)))
+points(sites[,c(3,2)], pch = 21, col = "blue", bg = col2alpha("blue", .9),cex = 1.2)
+lapply(path, lines, col = "orange", lwd = 2, lty = 1)->dummy
+```
+
+
+Now that more ecologically relevant distances are calculated we estimate distance-based eigenvector maps 
+```{r, cache = TRUE, message=FALSE, warning=FALSE, results=FALSE}
+#prep site data for dbmem
+  #merge all NBH inds to a single pop and convert to all caps
+pops <- pops %>%  
+  mutate(pop = as.character(pop)) %>%
+  mutate(pop = replace(pop, pop == "F", "NBH")) %>%
+  mutate(pop = replace(pop, pop == "P" , "NBH")) %>%
+  mutate(pop = replace(pop, pop ==  "Syc" , "NBH")) %>%
+  mutate(pop = replace(pop, pop ==  "H", "NBH")) %>%
+  mutate(pop = replace(pop, pop == "Mg", "MG")) %>%
+  mutate(pop = replace(pop, pop == "Hb", "HB"))
+
+
+ind_sites <- pops %>%
+  left_join(., sites, by = "pop")
+
+distance_matrix <- lc.dist(trans, ind_sites[,c(4,3)], res = "dist")
+
+#calculate dbmem and plot
+dbmem_pos<-dbmem(distance_matrix, MEM.autocor = "positive")
+```
+
+```{r fig.cap="Figure Caption: Plot of db-mems I values"}
+plot(attributes(dbmem_pos)$values)
+abline(h = 0)
+
+```
+
+The first 8 dbmems have moran-s I values above 0 (i.e describe spatial autocorrelation) and are retained as explanatory variables in the RDA
+
+__Temperature__  
+
+The environmental data is daily SSTs from the NOAA OI SST V2 High Resolution Dataset.
+
+We extracted 10 years of daily optimum interpolated sea surface temperatures
+(OISSTs) from NOAA/OAR/ESRL PSD (Reynolds et al. 2007) for each of the sampling
+locations and calculated three derived environmental variables: mean temperature, mean annual minimum and mean annual maximum. then calculated PCA. Scripts for this data extraction are not included in this R notebook.
+
+```{r env full, warning=FALSE, message=FALSE, fig.cap="Temperature variation PCA and associated screeplot", out.width=c("50%", "25%"), fig.show='hold'}
+
+#env variable for pops
+env<-read.table("./environmental/temp_summary.txt", sep = "\t", header = T)
+env <- env %>%
+  left_join(., pops, by = "pop")
+
+#pca
+env_pc <- prcomp(env[,c(2,3,4)], scale = TRUE)
+biplot(env_pc)
+plot(env_pc)
+env <- cbind(env, env_pc$x)
+
+```
+
+```{r env eda, fig.cap="Comparing temperature variables"}
+pairs.panels(env[,c(2,3,4,5,7,8,9)], scale = TRUE)
+```
+
+After all of that, chose to keep only two environmental variables, mean_annual_min and mean_annual max, because tenyearmean is so correlated with both of the other variables.
+
+
+### Genetic Data
+
+We use the covariance matrix calculated by PCANGSD to conduct a PCA that describes the genetic variation among samples. Then choose the number of PCs to retain using the Kaiser Guttman criteria
+
+```{r snp pca, cache = TRUE}
+#pca
+#to load pca: attach("./pcangsd/pca.r")
+#snp_pca<-read.table("./pcangsd/pca.txt", header = T, sep= "\t")
+
+#kaiser guttman
+cutoff<-mean(pc2$sdev^2)
+kg <- length((pc2$sdev^2)[(pc2$sdev^2)>cutoff])
+
+#pcs to keep
+snp_pcs <- pc2$x[,c(1:103)]
+
+```
+
+We keep the first `r kg` pcs to fit our RDA on
+
+### Final Dataset
+To make coding easier, merge explanatory vars into single dataset with varnames
+```{r}
+ex_var <- cbind(dbmem_pos, env[,c(2,3)])
+```
+
+### RDA
+
+In this section we run and visualize the RDA results
+
+First we run variable selection procedures and settle on the final model. Output for this section is too long to include in notebook, but stored in ./rda/rda_results_log.txt
+```{r, message=FALSE, warning=FALSE, cache=TRUE, results=FALSE}
+#global rda
+rda_null <- rda(snp_pcs ~ 1, data = ex_var)
+rda_full <- rda(snp_pcs ~ . , data = ex_var)
+
+#check that the full model is significant
+anova(rda_full) # 0.001 yes it is significant - proceed to variable selection
+
+#what the variance explained
+adjR2.rda_full <- RsquareAdj(rda_full)$adj.r.squared # 76%
+
+#variable selection
+ordiR2 <- ordiR2step(rda_null, scope = formula(rda_full, data = ex_var))
+ordiR2$anova #MEM7 not included in variable selection
+ordi <- ordistep(rda_null, scope = formula(rda_full, data = ex_var))
+rda.fs <- forward.sel(Y = snp_pcs, X = ex_var, adjR2thresh = adjR2.rda_full)
+
+vif.cca(rda_full)
+```
+
+Then we fit the final model and test for significance of constrained axes and the explanarotry variable on margin. We also test the global signifance of the models. Detailed outputs are available in ./rda/rda_results_log.txt
+```{r cache=TRUE, warning=FALSE, message=FALSE}
+#final model
+rda_final <- rda(snp_pcs ~  mean_annual_max + mean_annual_min + MEM1 + MEM2 + MEM3 + MEM4 + MEM5 + MEM6 + MEM7+ MEM8 , data = ex_var)
+
+#testing signficance of constrained axes (how many are interesting)
+rda_axis <- anova.cca(rda_final, by = 'axis', parallel = 3)
+rda_axis$p.adj <- p.adjust (rda_axis$`Pr(>F)`, method = 'holm')
+
+#testing significance of explanatory variables by margin (each conditioned on all the others)
+rda_expl <-  anova.cca(rda_final, by = 'margin', parallel = 3)
+rda_expl$p.adj <- p.adjust (rda_expl$`Pr(>F)`, method = 'holm')
+
+#variance partitioning
+vp <- varpart(snp_pcs , ex_var[,c(9,10)] , ex_var[,c(1:8)])
+
+#controlling for spatial autocor
+rda_ind_con_spatial<-rda(snp_pcs ~ as.matrix(env[,c(2)]) + Condition((as.matrix(dbmem_pos)[,c(1:8)])))
+
+#controlling for temp
+rda_ind_con_temp<-rda(snp_pcs ~ Condition(as.matrix(env[,c(2)])) + (as.matrix(dbmem_pos)[,c(1:8)]))
+
+#anovas
+aov_global <- anova(rda_final)
+aov_con_spatial <- anova(rda_ind_con_spatial) 
+aov_con_temp <- anova(rda_ind_con_temp)
+
+
+```
+
+
+__RDA Results Summary__
+
+We fit a global model of all variables. This full model was significant. We then performed forward variable selection. Three approaches yielded 3 results. Ordistep (vegan) ordiR2step(vegan), and forward.sel(adespatial). Ordistep (uses AIC) call for a full model. OrdiR2step (uses adjusted R2  and p value only) retains all MEMs and mean annual min. Forward.sel retains all MEMs and no temperature variables. Variance inflation factors are low for all explanatory vars (< 3.4). For the sake of ecological interpretability we retain both environmental vars - i.e. went with AIC.  
+
+The first 6 RDA axes are significant (i.e. explain significantly more than the equivalent unconstrained axes, Holms adjusted p value < 0.05). All explanatory variables are also significant (i.e. significantly greater explanation of variance for the variable, once the data is conditioned on all other variables, Holms adjusted p value < 0.05)
+
+Collectively these suggest that there is a significant relationship between the environmental temperature variable and the genetic covariance among samples, once the genetic data is conditioned on the effect of spatial autocorrelation AND vice versa. 76.5% of the total variation in the genetic dataset (or at least the first 103 of 1371 principal components of it) was constrained by the RDA.
+
+Using variance partitioning, the relative effect of spatial autocorrelation and temperature could be estimated. Adjusted R2 for the effect of temperature, once spatial autocorrelation is accounted for, is 0.1%. In contrast 64.7% of the genetic dataset was explained by spatial autocorrelation alone. 11.4% of variation was explained jointly and could not be parsed. 23.7% was residual.
+
+Examining the triplot suggests that the first dbmem separates northern from southern at the NJ. 
+
+__RDA figures and results tables__
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE, fig.cap="RDA Triplot"}
+
+## tri plot
+#site score
+rda_sum<-summary(rda_full, axes = c(6))
+scores <- as.data.frame(rda_sum$sites)
+scores$pop<-pops$pop
+scores$pop <- factor( as.character(scores$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "CT", "SR", "BP", "HB",  "NBH", "P", "SLC", "ME", "MDIBL")  )
+
+#species scores
+arrows<-as.data.frame(rda_sum$biplot)
+
+#plot
+ggplot()+geom_point(aes(RDA1, RDA2, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), color="red")+geom_text(data=arrows, aes(x=RDA1+RDA1*0.2, y=RDA2+RDA2*0.2, label=c("MEM1", "MEM2","MEM3","MEM4","MEM5", "MEM6","MEM7", "MEM8", "MaxTemp", "MinTemp")), size = 4,  color="red")+theme_bw()+xlab("Redundant Axis 1 - 58%")+ylab("Redundant Axis 1 - 17%")
+```
+
+```{r, fig.cap="Screeplot of RDA - red is constrained axes, black is unconstrained axes"}
+## screeplot
+
+constrained_percent <- rda_full$CCA$eig/rda_full$tot.chi*100
+unconstrained_percent <- rda_full$CA$eig/rda_full$tot.chi*100
+barplot (c(constrained_percent, unconstrained_percent), col = c(rep ('red', length (constrained_percent)), rep ('black', length (unconstrained_percent))), las = 2, ylab = '% variation')
+```
+
+__minor notes for deeper analysis if wanted__   
+* if we conduct the RDA on all pcs (not just those exceeding the kaiser guttman criteria) we can relate the RDA results more clearly to FST, i.e. we can see how much of the total variation among the cline is explained by RDA and compare this to results from amova and so on  
+* cRDA (RDA on the components of genetic variation) seems to be less powerful at identifying adaptive loci, largely because these loci can load into pcs, could do a locus by locus RDA, but this would present its own challenges - somehting to consider
+
+
+
+
+
+
+
+
 
 ## SFS
+
+Work using the SFS is contained in a seaprate R notebook, all code below is draft for future work
 
 __SFS Analysis Outline__  
 * Make consensus sequence from grandis reads to polarize the SAF - doFasta -2  
@@ -1998,213 +2275,8 @@ $ANGSD -P 38 -b ../meta_data/grandis.bams -ref $REF -out ./Results/grandis_conse
 
 __SAF 1 big population__
 
-
-
 ### 2d SFS
 
 ### global FST   
 
 ### Per site summary stats  
-
-# Landscape Genetics
-
-```{r message=FALSE, warning=FALSE}
-require(vegan)
-require(ade4)
-require(adespatial)
-require(SoDA)
-require(marmap)
-```
-
-
-## spatial and environmental data
-
-__distances__  
-rather than using distance matrices based on latitude and longitude, we make a more biologically relevant model where spatial distances among populations is determined by connections via shallow water <5 meters) this is accomplished via the marmap package in R
-
-```{r map, message=FALSE, warning=FALSE, cache=TRUE}
-atlantic <- getNOAA.bathy(lon1 = -83, lon2 = -65, lat1 = 28, lat2 = 48, resolution = 1)
-blues <- c("lightsteelblue4", "lightsteelblue3", "lightsteelblue2", "lightsteelblue1")
-greys <- c(grey(0.6), grey(0.93), grey(0.99))
-plot(atlantic, image = TRUE, land = TRUE, lwd = 0.03, bpal = list(c(0, max(atlantic), greys),c(min(atlantic), 0, blues)))
-#sites<-read.table("~/Science/fundulus_clinal/cline/environmental/lat_lon2.txt", header=T)
-sites<-read.table("./environmental/bathy_sites.txt", header = T, sep = "\t")
-#remove braytonpt and oc
-#sites3<-sites2[c(-7,-11),]
-#row.names(sites)<-sites[,1]
-#sites<-sites[,-1]
-#sites2<-sites
-#sites2[,1]<-sites[,2]
-#sites2[,2]<-sites[,1]
-trans<-trans.mat(atlantic, min.depth=1 , max.depth=-15)
-path <- lc.dist(trans, sites[,c(3,2)], res = "path")
-#distance_matrix <- lc.dist(trans, sites[,c(3,2)], res = "dist")
-points(sites[,c(3,2)], pch = 21, col = "blue", bg = col2alpha("blue", .9),cex = 1.2)
-lapply(path, lines, col = "orange", lwd = 2, lty = 1)->dummy
-#get.depth(atlantic, sites[,c(3,2)]	, locator = FALSE)
-
-#distance_matrix
-
-```
-
-
-```{r, cache = TRUE}
-#prep site data for dbmem
-  #merge all NBH inds to a single pop and convert to all caps
-pops <- pops %>%  
-  mutate(pop = as.character(pop)) %>%
-  mutate(pop = replace(pop, pop == "F", "NBH")) %>%
-  mutate(pop = replace(pop, pop == "P" , "NBH")) %>%
-  mutate(pop = replace(pop, pop ==  "Syc" , "NBH")) %>%
-  mutate(pop = replace(pop, pop ==  "H", "NBH")) %>%
-  mutate(pop = replace(pop, pop == "Mg", "MG")) %>%
-  mutate(pop = replace(pop, pop == "Hb", "HB"))
-
-
-ind_sites <- pops %>%
-  left_join(., sites, by = "pop")
-
-distance_matrix <- lc.dist(trans, ind_sites[,c(4,3)], res = "dist")
-
-#calculate dbmem and plot
-dbmem_pos<-dbmem(distance_matrix, MEM.autocor = "positive")
-
-plot(attributes(dbmem_pos)$values)
-abline(h = 0)
-
-
-
-```
-
-The first 8 dbmems have vaules above 0 (i.e describe spatial autocorrelation)
-
-
-
-
-__temperatures__  
-
-The environmental data is daily SSTs (NOAA OI SST V2 High Resolution Dataset) from 
-
-We extracted 10 years of daily optimum interpolated sea surface temperatures
-(OISSTs) from NOAA/OAR/ESRL PSD (Reynolds et al. 2007) for each of the sampling
-locations and calculated three derived environmental variables: mean temperature, mean
-annual minimum and mean annual maximum (table 5.1, fig. 5.1). The first principal
-component in a principal component analysis captured 90.1% of the variance among
-these variables, and all three variables were highly correlated as indicated by the biplot
-(supplementary fig. 5.1). While mean temperature and mean annual maximum
-demonstrate a linear relationship with latitude (R2 = 0.87 and 0.97; slope = -0.97 and -
-128
-1.1°C per ° latitude, respectively), minimum temperature is constrained by the freezing
-temperature of seawater and plateaued beyond 39 degrees of latitude. The value of the
-first temperature principal component and position along the shore for the sampling
-locations are also strongly correlated (R2 = 0.94, p < 10-9 ANOVA)
-
-```{r env full}
-
-#env variable for pops
-env<-read.table("./environmental/temp_summary.txt", sep = "\t", header = T)
-env <- env %>%
-  left_join(., pops, by = "pop")
-
-```
-
-## genetic data
-
-We use the covariance matrix calculated by PCANGSD to conduct a PCA that describes the genetic variation among samples. Then choose the number of PCs to retain using the Kaiser Guttman criteria
-
-```{r snp pca, cache = TRUE}
-#pca
-#to load pca: attach("./pcangsd/pca.r")
-#snp_pca<-read.table("./pcangsd/pca.txt", header = T, sep= "\t")
-
-#kaiser guttman
-cutoff<-mean(pc1$sdev^2)
-kg <- length((pc1$sdev^2)[(pc1$sdev^2)>cutoff])
-
-#pcs to keep
-snp_pcs <- pc1$x[,c(1:103)]
-
-```
-
-We keep the first `kg` pcs to fit our RDA on
-
-## RDA
-
-Finally we get to running the RDA. We conduct a global RDA, an RDA for the temperature once conditioned on spatial data, and an RDA on the genetic DATA + spatial data once conditioned on the temperature. then we do model selection, significance testing and variance partitioning
-
-```{r message=FALSE, warning=FALSE, cache=TRUE}
-#global rda
-rda_null <- rda(snp_pcs ~ 1)
-rda_ind<-rda(snp_pcs ~ as.matrix(env[,c(2)]) +as.matrix(env[,c(3)])  + as.matrix(env[,4]) +   (as.matrix(dbmem_pos[,1])) + (as.matrix(dbmem_pos[,2])) + (as.matrix(dbmem_pos[,3])) + (as.matrix(dbmem_pos[,4]))+ (as.matrix(dbmem_pos[,5])) + (as.matrix(dbmem_pos[,6])) + (as.matrix(dbmem_pos[,7])) + (as.matrix(dbmem_pos[,8])))
-
-#variable selection
-ordi <- ordistep(rda_null, scope = formula(rda_ind))
-#ordi$anova
-
-#variance partitioning
-vp <- varpart(snp_pcs ,as.matrix(env[,c(2,3,4)]) , (as.matrix(dbmem_pos)[,c(1:8)]))
-
-#controlling for spatial autocor
-rda_ind_con_spatial<-rda(snp_pcs ~ as.matrix(env[,c(2)]) + Condition((as.matrix(dbmem_pos)[,c(1:8)])))
-
-#controlling for temp
-rda_ind_con_temp<-rda(snp_pcs ~ Condition(as.matrix(env[,c(2)])) + (as.matrix(dbmem_pos)[,c(1:8)]))
-
-#anovas
-aov_global <- anova(rda_ind)
-aov_con_spatial <- anova(rda_ind_con_spatial) 
-aov_con_temp <- anova(rda_ind_con_temp)
-
-
-```
-
-
-__RDA Results Summary__
-
-This is a preliminary summary, more detailed results are to come.
-
-
-We used the ordiR2step function to select our model. Using forward selection the full model was chosen (8 dbMEMs describing spatial autocorrelation and 3 environmental summary variables (mean temperature mean annual minimum, and mean annual maximum)). 
-
-Three RDAs were fit and tested for significance:  
-* global RDA - both the effect of spatial autocorrelation (the dbMEMs) and the effect of temerpature  - p < 0.001  
-* RDA of temperature effect, conditioned on spatial autocorrelation - p < 0.001 
-* RDA of spatial effect conditioned on temperature - p < 0.001
-
-Collectively these suggest that there is a significant relationship between the environmental temperature variable and the genetic covariance among samples, once the genetic data is conditioned on the effect of spatial autocorrelation AND vice versa. 76% of the total variation in the genetic dataset (or at least the first 103 of 1371 principal components of it) was constrained by the RDA.
-
-Using the variance partitioning the relative effect of spatial autocorrelation and temperature could be estimated. Adjusted R2 for the effect of temperature, once spatial autocorrelation is accounted for, is 0.4%. In contrast 62% of the genetic dataset was explained by spatial autocorrelation alone. 14% of variation was explained jointly and could not be parsed. 23% was residual.
-
-Examining the triplot suggests that the first dbmem separates northern from southern at the NJ. 
-
-__RDA figures and results tables__
-
-```{r, cache = TRUE}
-#triplot
-rda_sum<-summary(rda_ind)
-scores<-as.data.frame(scores(rda_ind)$sites)
-scores$pop<-pops$pop
-arrows<-as.data.frame(rda_sum$biplot)
-  #order the factors
-scores$pop <- factor( as.character(scores$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "CT", "SR", "BP", "HB",  "NBH", "P", "SLC", "ME", "MDIBL")  )
-ggplot()+geom_point(aes(RDA1, RDA2, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), alpha=0.75, color="red")+geom_text(data=arrows, aes(x=RDA1+0.2, y=RDA2, label=c("Max Temp", "Min Temp", "Mean Temp", "dbMEM1", "dbMEM2","dbMEM3","dbMEM4","dbMEM5", "dbMEM6","dbMEM7", "dbMEM8")), size = 5, vjust=1, color="red")+theme_bw()
-
-
-rda_ind
-aov_global
-
-rda_ind_con_spatial
-aov_con_spatial 
-
-rda_ind_con_temp
-aov_con_temp 
-
-
-
-```
-
-
-
-__notes for going forward__   
-* it might be innappropirate to conduct anovas of rda condition on the combined environmental or dbmem matrices, it may be neccessary to indivudally test each variable, consitioned on all other variables... read into this before proceeding  
-* if we conduct the RDA on all pcs (not just those exceeding the kaiser guttman criteria) we can relate the RDA results more clearly to FST, i.e. we can see how much of the total variation among the cline is explained by RDA and compare this to results from amova and so on
