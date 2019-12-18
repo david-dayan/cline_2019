@@ -1,0 +1,119 @@
+---
+title: "Cline 2019: SFS Based Analyses"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+---
+
+```{r packages, message=FALSE, warning=FALSE, include=FALSE}
+require(knitr)
+require(tidyverse)
+require(DiagrammeR)
+require(dplyr)
+require(plotly)
+require(stringr)
+require(psych)
+
+```
+
+
+__Document Summary:__  
+This is an R notebook for the portion of the _Fundulus heteroclitus_ clinal genetics analysis that uses the site frequency spectrum to estimate divergence (Fst), model past demographic scenarios (DADI and MOMENTS), and calculate popgen summary statistics (Theta, TajD etc). Preceding analyses can be found in a second R notebook. 
+
+Top level summaries of methods and results are given in the main text. More detailed explanatation of each step are provided as comments in a header or footer within each code chunk.
+
+Code chunks in R, python and bash are generally run locally, while shell scripts are nearly always run remotely on the Clark University high performance computing cluster.
+
+## Analysis outline
+
+```{r}
+grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+      tab6 [label = '@@6']
+      tab7 [label = '@@7']
+      tab8 [label = '@@8']
+
+      # edge definitions with the node IDs
+      tab1 -> tab2
+      tab2 -> tab3
+      tab3 -> tab4 -> tab5
+      tab3 -> tab6
+      tab3 -> tab7
+      tab8 -> tab1
+      }
+
+      [1]: 'ANGSD -GL 1 -doSAF unfolded'
+      [2]: 'SAF'
+      [3]: 'SFS (realSFS)'
+      [4]: 'Dadi conversion '
+      [5]: 'moments/Dadi'
+      [6]: 'theta, tajD'
+      [7]: 'FST'
+      [8]: 'bam files'
+      
+      ")
+
+```
+
+In this second analysis we calculate site allele frequencies from the genotype likelihoods, then use this SAF to generate site frequency spectra. This SFS can be used for demographic modelling to examine the hypothesis that contemporary _F. heteroclitus_ population genetic structure was shaped by post-glacial secondary recontact between the main population and a northern glacial refugia population. Secondarily, the SFS cna be used to calculate site-wise FST and other site wise stats (theta and Tajima's D) and may be included in the main analysis if an outlier approach to identifying adaptive genetic variation is desirable.
+
+## Estimate SFS
+
+__SFS Analysis Outline__  
+* Make consensus sequence from grandis reads to polarize the SAF - doFasta -2  
+* estimate SAFs for each population and metapopulation  -doSAF
+* estimate per population SFS  
+* estimate 2dSFS for each pair of populations  
+* 1d and 2dSFS used in downstream analyses: per-site summary statistics, global Fst, and dadi  
+
+questions: 
+*is it possible to estimate SAF without re-estimating GLs (we already have them)
+*what filtering is neccesarry for the population and 2d sfs, when there are so few indiviudals a maf of 1% becomes unmeaningful, should we filter to a higher MAF or at least, increase min number of individuals for a site to be retained (i.e. saf estimate is likely to be very very bad if there are sites with 2 individuals)
+*how should we pool sampling locales into metapopulations (i.e. it's clear that all the NBH populations should be combined into a single pop, but what about all NJ populations or all ME populations) - what spatial or genetic scale should be the cutoff for pooling populations
+
+
+### 1d SFS estimation
+
+__ancestral sequence__
+
+Polarize SAF by an outgroup (f grandis)
+use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
+
+```{bash, eval = FALSE}
+
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=6-23:59:00
+
+#SBATCH --cpus-per-task=38
+
+# set partition/queue to use
+#SBATCH --partition=week-long-cpu
+
+# set name of job
+#SBATCH --job-name=consensus
+
+# set name of output file
+#SBATCH --output=consensus.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+
+FILTERS="-uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -minMapQ 20"
+DOS="-doFasta 2 -doCounts 1 -dumpCounts 2" 
+
+$ANGSD -P 38 -b ../meta_data/grandis.bams -ref $REF -out ./Results/grandis_consensus.fa \
+  $FILTERS $DOS \
+```
