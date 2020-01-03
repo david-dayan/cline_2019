@@ -81,6 +81,9 @@ sites<-read.table("./sites/sites.txt", header = T, sep = "\t")
 kable(sites)
 ```
 
+A note about the NBH and filtering:  
+The population NBH has several sampling sites very nearby (i.e. <5km) and exists along a strong pollution cline. This population
+
 ```{r}
 #chunk to pull map
 ```
@@ -1627,6 +1630,15 @@ plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="mar
 
 ```
 
+Now is also a good point to explore how to deal with NBH fish - this site was subsampled and is along a strong pollution cline about 5km long. A good starting place is whether these populations can be discriminated in PC space. Here we subset the global PCA to look just at NBH populations.
+
+```{r message=FALSE, warning=FALSE, cache=TRUE, fig.cap='Fig EDA PCA3: (ONLY FOR NBH POPs) Principal component analysis of genetic variation from the exploratory ANGSD run (gl_0.1) including 3rd pc. hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document.'}
+nbh <-pc_inds[pc_inds$pop %in% c("F", "P", "NBH", "Syc" ,"H"),]
+plot_ly(x=nbh$PC1, y=nbh$PC2, z=nbh$PC3, type="scatter3d", mode="markers", color=nbh$pop)
+```
+
+This suggests that for sites contributing to the majority of variation (i.e. the first three pcs) you can't discriminate between the five NBH subpopulations (although evidence of a strong pollution cline suggests there may be some sites along the cline that vary)
+
 __Conclusions of EDA PCA__
 
 It looks like there are some QC issues to take on (or a grandis individual is more similar to f het than other grandis), but that this approach is at least working well enough to differentiate pops in PC space. Also, it seems as though PC 1 dominates the PCA (75% of variance) and simply separates _F grandis_ from _F heteroclitus_.  PC2 (15%) separate poulations among the southern clade (south of NJ) while PC3 (3%) separates northern clade populations. 
@@ -1843,12 +1855,20 @@ pc_inds<-as.data.frame(pc2$x)
 row.names(pc_inds)<-fish_names
 pc_inds$pop<-gsub("_\\d+", "", fish_names)
 
+#here we consolidate NBH subpops into a single population
+#strategy-using regex, replace all NBH pops (F, P Syc H) in the pc_inds file with NBH
+#also clean up the names (Mg and MG)
+
+pc_inds$pop <-recode(pc_inds$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG")
+
 # write.table(pc_inds, file = "./pcangsd/pca.txt", quote = FALSE) #commented to avoid overwriting, run if doing first run through analysis
 
-
-#caution this deletes al nbh pops except nbh, fix later
+#create dataframe for plotting
+  #first need to fix the sites dataframe
+sites$Abbreviation <- recode(sites$Abbreviation, 'NBH, F, H, P, Syc' = "NBH")
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
 
+#plot
 ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
 ```
 
@@ -1865,7 +1885,7 @@ The final PCA corroborates previous descriptions of the _F heteroclitus_ populat
 
 ### Admixture
 
-NGSadmix is used to estimate ancestry for K = 1-6 with 10 replicate runs and best k determined by the Evanno method (not included in notebook - [online app](http://taylor0.biology.ucla.edu/structureHarvester/)). Run details for publication quality and other other k plotting are in the "ngs_admix" directory. 
+NGSadmix is used to estimate ancestry for K = 1-6 with 10 replicate runs and best k determined by the Evanno method (not included in notebook - [online app](http://taylor0.biology.ucla.edu/structureHarvester/)). Run details for publication quality figures and other other k plotting are in the "ngs_admix" directory. 
 
 Below is a structure plot of the best K according to Evanno method (k=2).
 ```{bash, eval = FALSE}
@@ -1936,9 +1956,9 @@ plot_data <- q %>%
   ungroup() %>% 
   dplyr::arrange(factor( as.character(pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "Mg", "CT", "SR", "BP", "HB", "Hb", "H", "F", "M", "Syc", "NBH", "P", "SLC", "ME", "MDIBL")  ))
 
-#reorder levels
+#reorder levels, combine capitalization errors, consolidate NBH pops
 plot_data$pop <- factor( as.character(plot_data$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "Mg", "CT", "SR", "BP", "HB", "Hb", "H", "F", "M", "Syc", "NBH", "P", "SLC", "ME", "MDIBL")  )
-
+plot_data$pop <- recode(plot_data$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG", Hb = "HB")
 
 
 #ggplot(plot_data, aes(id, prob, fill = cluster)) +
@@ -1947,7 +1967,7 @@ plot_data$pop <- factor( as.character(plot_data$pop), levels=c("GA", "SC", "WNC"
 
 ggplot(plot_data, aes(id, prob, fill = cluster)) +
   geom_col() +
-  facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.01, "lines"), axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position = "none")
+  facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.1, "lines"), axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position = "none")
 ```
 
 Data also formatted for clumpak visualization below
@@ -1967,6 +1987,25 @@ write.table(logs[, c(2, 1)], "/ngs_admix/logfile_likelihood_formatted.txt", row.
 ```
 
 Note - delta K method suggest best K is 2, but prob(k) is maximixed at k = 6, suggesting runs of further K may be neccessary.
+
+__Admixture Levels__
+
+
+```{r}
+plot_data %>%
+  filter(cluster == "V1") %>%
+  filter(assingment_prob > 0.9) %>%
+  group_by(pop) %>%
+  summarize(mean_s_cluster = mean(assingment_prob), sd = sd(assingment_prob), n = n())
+
+plot_data %>%
+  filter(cluster == "V1") %>%
+  filter(assingment_prob > 0.9) %>%
+  select(sample) %>%
+  write_tsv("./ngs_admix/non-admixed_inds.txt", col_names = FALSE, )
+```
+
+Sample names of Individuals with admixture portions > 90% are written to a file for use later. 
 
 __Admixture Results__  
 The STRUCTURE plot above agrees with previous analyses. The primary aspect of population structure is the break north of New Jersey (i.e. best K is 2 and splits into two groups north and south of the Hudson Basin). Also of note on the k=2 plot is the evidence of introgression of northern ancestry into the admixture zone throughout New Jersey (in population SH, RB, OC, and MG). Surprisingly there is some introgression of southern alleles into the southern extremes of the northern population in Connecticut and Rhode Island(CT, and SR)

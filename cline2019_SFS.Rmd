@@ -76,18 +76,26 @@ __SFS Analysis Outline__
 * estimate 2dSFS for each pair of populations  
 * 1d and 2dSFS used in downstream analyses: per-site summary statistics, global Fst, and dadi  
 
+to do:
+make bam lists (or split the beagle files) for different populations/metapopulaitons
+caluclate SAFs and estimate SFS for the different ones
+outline dadi/moments analysis
+start to draft script and/or start installation and sandboxing
+
 questions: 
-*is it possible to estimate SAF without re-estimating GLs (we already have them)
-*what filtering is neccesarry for the population and 2d sfs, when there are so few indiviudals a maf of 1% becomes unmeaningful, should we filter to a higher MAF or at least, increase min number of individuals for a site to be retained (i.e. saf estimate is likely to be very very bad if there are sites with 2 individuals)
-*how should we pool sampling locales into metapopulations (i.e. it's clear that all the NBH populations should be combined into a single pop, but what about all NJ populations or all ME populations) - what spatial or genetic scale should be the cutoff for pooling populations
+*is it possible to estimate SAF without re-estimating GLs (we already have them) - yes, but would require filtering on the beagle files which is not trivial given their structure
+*what filtering is neccesarry for the population and 2d sfs, when there are so few indiviudals a maf of 1% becomes unmeaningful, should we filter to a higher MAF or at least, increase min number of individuals for a site to be retained (i.e. saf estimate is likely to be very very bad if there are sites with 2 individuals)  
+*how should we pool sampling locales into metapopulations (i.e. it's clear that all the NBH populations should be combined into a single pop, but what about all NJ populations or all ME populations) - what spatial or genetic scale should be the cutoff for pooling populations - answer: if the populations can clearly be discrimated in PC space then they are separated
 
 
-### 1d SFS estimation
+### SAF estimation and acenstral sequence
+
+Estimate site allele frequency probabilities for each population. 
 
 __ancestral sequence__
 
-Polarize SAF by an outgroup (f grandis)
-use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
+First we need the ancestral sequence for eventual unfolded SFS calculation. This is accomplished by polarizing the SAF using an outgroup (f grandis). We estimate the ancestral sequence by making a consensus sequence among the F grandis reads
+
 
 ```{bash, eval = FALSE}
 
@@ -108,6 +116,8 @@ use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
 #SBATCH --output=consensus.out
 
 
+# use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
+
 ANGSD="/opt/angsd0.928/angsd/angsd"
 REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
 
@@ -117,3 +127,108 @@ DOS="-doFasta 2 -doCounts 1 -dumpCounts 2"
 $ANGSD -P 38 -b ../meta_data/grandis.bams -ref $REF -out ./Results/grandis_consensus.fa \
   $FILTERS $DOS \
 ```
+
+
+__make population-wise bamfiles__  
+Here we need to split the bams into population to estimate SAFs
+
+```{bash, eval = FALSE}
+# the final set of fish is in good_nograndis2 bamlist, split into populations
+
+mkdir filtered_bams
+grep "BP_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/BP.bams
+grep "CT_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/CT.bams
+grep "GA_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/GA.bams
+grep "Hb_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/HB.bams
+grep "KC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/KC.bams
+grep "M_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/M.bams
+grep "MDIBL_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/MDIBL.bams
+grep "ME_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/ME.bams
+grep -i "MG_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/MG.bams
+grep "NBH_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/NBH.bams
+grep "F_[0-9]*" good_no_grandis_2.bamlist >> ./filtered_bams/NBH.bams
+grep "/H_[0-9]*" good_no_grandis_2.bamlist >> ./filtered_bams/NBH.bams
+grep "/P_[0-9]*" good_no_grandis_2.bamlist >> ./filtered_bams/NBH.bams
+grep -i "SYC_[0-9]*" good_no_grandis_2.bamlist >> ./filtered_bams/NBH.bams
+grep "/NC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/NC.bams
+grep "OC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/OC.bams
+grep "RB_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/RB.bams
+grep "SC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/SC.bams
+grep "SH_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/SH.bams
+grep "SLC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/SLC.bams
+grep "SR_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/SR.bams
+grep "WNC_[0-9]*" good_no_grandis_2.bamlist > ./filtered_bams/WNC.bams
+
+
+cd ./filtered_bams
+cat BP.bams CT.bams HB.bams M.bams MDIBL.bams ME.bams NBH.bams SLC.bams SR.bams > northern_clade.bams
+cat GA.bams KC.bams MG.bams NC.bams OC.bams RB.bams SC.bams SH.bams WNC.bams > southern_clade.bams
+
+#filtering out highly admixed inds
+grep -f non-admixed_inds.txt southern_clade.bams > southern_non_admixed.bams
+grep -f non-admixed_inds.txt northern_clade.bams > northern_non_admixed.bams
+
+```
+
+
+notes:    
+* stratification within a "population" - all NBH pops are collapsed to a single population, otherwise all are kept separate  
+*created additional metapopulations excluding individuals with a high degree of recent admixture (mean cluster probability < 90%), this roughly corresponds with third generation back cross, see admixture portion of methods for details
+
+
+__estimate SAF probabilities__  
+for each population we estimate the SAF
+
+Notes:  
+*use SNPs from the final (1.3) GLs  
+*polarized using the consensus sequence from grandis  
+
+```{bash, eval = FALSE}
+#Generate a list of sites for filtering (i.e sites retained in the gl_1.3)
+
+#cut first column out of gl_1.3 then do regex to produce the desired file format (chrom \t pos)
+zcat gl_1.3.beagle.gz| awk '{print $1}' > tmp1
+sed 1d tmp1 > tmp2
+sed "s/_/\t/" tmp2 > site_list_1.3.txt
+rm tmp1 
+rm tmp2
+
+#index
+/opt/angsd0.928/angsd/angsd sites index site_list_1.3.txt
+
+
+```
+
+
+```{bash, eval = FALSE}
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=10
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=angsd_saf
+
+# set name of output file
+#SBATCH --output=angsd_bp_saf.out
+
+
+ANGSD="/opt/angsd0.928/angsd/angsd"
+REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
+ANC="/home/ddayan/fundulus/ANGSD/Results/grandis_consensus.fa.fa.gz "
+
+FILTERS="-sites /home/ddayan/fundulus/ANGSD/Results/site_list_1.3.txt"
+DOS="-doSaf 1 -GL 1" 
+
+$ANGSD -P 10 -b /home/ddayan/fundulus/meta_data/filtered_bams/BP.bams -ref $REF -anc $ANC -out /home/ddayan/fundulus/ANGSD/Results/SAFs \
+  $FILTERS $DOS
+```
+
+
+
+
