@@ -1,0 +1,20 @@
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, T1, T2, P , p_misid)
+1	Round_1_Replicate_1	-2718.27	5448.54	1239.18	363.09	0.519,3.7314,2.6121,0.5232,2.2866,0.3271
+1	Round_1_Replicate_1	-2718.28	5448.56	1238.43	365.11	0.5162,3.7116,2.6285,0.5269,2.2679,0.3241
+1	Round_1_Replicate_1	-2718.28	5448.56	1237.49	364.34	0.5174,3.7191,2.6216,0.5253,2.2747,0.3252
+1	Round_1_Replicate_1	-2718.28	5448.56	1238.43	365.16	0.5162,3.7111,2.6289,0.527,2.2674,0.3241
+1	Round_1_Replicate_1	-2718.28	5448.56	1237.16	364.9	0.5166,3.7133,2.6268,0.5261,2.2699,0.3245
+1	Round_1_Replicate_1	-2718.28	5448.56	1241.15	365.06	0.5159,3.7126,2.6324,0.527,2.2684,0.3239
+1	Round_1_Replicate_1	-2718.28	5448.56	1238.99	365.06	0.5165,3.7119,2.6278,0.5271,2.2683,0.3241
+1	Round_1_Replicate_1	-2718.28	5448.56	1241.21	364.17	0.5178,3.7193,2.6194,0.5259,2.2778,0.3258
+1	Round_1_Replicate_1	-2718.28	5448.56	1241.08	364.89	0.5168,3.7138,2.6257,0.5265,2.2689,0.3248
+1	Round_1_Replicate_1	-2718.28	5448.56	1239.06	365.01	0.5166,3.7117,2.6271,0.5268,2.2694,0.3244

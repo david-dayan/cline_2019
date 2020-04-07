@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=1
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=SCg
+
+# set name of output file
+#SBATCH --output=SCg_%a.out
+
+#SBATCH --array=1-10
+
+source /home/ddayan/software/demography/env/bin/activate
+python /home/ddayan/software/demography/moments_pipeline/SCg.py

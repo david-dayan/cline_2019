@@ -1,0 +1,13 @@
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1_0,nu2_0,nu1,nu2,T,m12,m21,m12i,m21i,P,p_misid)
+1	Round_1_Replicate_1	-9167.71	18357.42	31010.03	1285.77	0.0231,1.4851,0.0029,19.9828,0.0017,0.5731,19.81,0.0026,0.5622,0.0014,0.6418
+1	Round_1_Replicate_1	-6915.0	13852.0	26402.97	1423.93	0.0019,20.0,7.466,0.0159,0.0032,0.001,0.0012,16.5058,1.0789,0.9529,0.4772
+1	Round_1_Replicate_1	-3027.43	6076.86	2074.94	1046.16	0.0341,2.1321,0.6522,1.0291,0.0951,4.3434,1.5668,0.001,0.0832,0.001,0.0004

@@ -1,0 +1,70 @@
+Fri Jan 31 22:18:11 2020: Running validation tests on input files
+Fri Jan 31 22:18:11 2020: Finished validating - Submitting job to queue
+Fri Jan 31 22:18:13 2020: Job 1580509090 was submitted to queue.
+Sat Feb  1 00:18:32 2020: Job 1580509090 started running.
+Sat Feb  1 00:18:32 2020: Retrieving data from files for each K
+Sat Feb  1 00:18:32 2020: K=1 mean: -67541631.4337156
+Sat Feb  1 00:18:32 2020: K=1 standard deviation: 1.66233397269996e-05
+Sat Feb  1 00:18:32 2020: K=1 median: -67541631.4337215
+Sat Feb  1 00:18:32 2020: K=2 mean: -66171730.7188219
+Sat Feb  1 00:18:32 2020: K=2 standard deviation: 0.388688468461447
+Sat Feb  1 00:18:32 2020: K=2 median: -66171730.6055155
+Sat Feb  1 00:18:32 2020: K=3 mean: -65881787.1713705
+Sat Feb  1 00:18:32 2020: K=3 standard deviation: 53884.6413727164
+Sat Feb  1 00:18:32 2020: K=3 median: -65848222.9251115
+Sat Feb  1 00:18:32 2020: K=4 mean: -65647388.432078
+Sat Feb  1 00:18:32 2020: K=4 standard deviation: 312.517050097786
+Sat Feb  1 00:18:32 2020: K=4 median: -65647148.4101775
+Sat Feb  1 00:18:32 2020: K=5 mean: -65535941.553303
+Sat Feb  1 00:18:32 2020: K=5 standard deviation: 8871.3113993325
+Sat Feb  1 00:18:32 2020: K=5 median: -65535878.6804065
+Sat Feb  1 00:18:32 2020: K=6 mean: -65430110.9148537
+Sat Feb  1 00:18:32 2020: K=6 standard deviation: 15901.8589000316
+Sat Feb  1 00:18:32 2020: K=6 median: -65424980.9940085
+Sat Feb  1 00:18:32 2020: K=7 mean: -65362698.8622206
+Sat Feb  1 00:18:32 2020: K=7 standard deviation: 10739.2232148948
+Sat Feb  1 00:18:32 2020: K=7 median: -65356653.618659
+Sat Feb  1 00:18:32 2020: K=8 mean: -65308991.1950752
+Sat Feb  1 00:18:32 2020: K=8 standard deviation: 10064.2777684685
+Sat Feb  1 00:18:32 2020: K=8 median: -65305532.362032
+Sat Feb  1 00:18:32 2020: K=9 mean: -65258809.76689
+Sat Feb  1 00:18:32 2020: K=9 standard deviation: 7133.37653851276
+Sat Feb  1 00:18:32 2020: K=9 median: -65258511.7684585
+Sat Feb  1 00:18:32 2020: Calculating Best K by Evanno
+Sat Feb  1 00:18:32 2020: Ln'(2) = 1369900.71489371
+Sat Feb  1 00:18:32 2020: Ln'(3) = 289943.547451384
+Sat Feb  1 00:18:32 2020: Ln'(4) = 234398.739292517
+Sat Feb  1 00:18:32 2020: Ln'(5) = 111446.878775001
+Sat Feb  1 00:18:32 2020: Ln'(6) = 105830.638449311
+Sat Feb  1 00:18:32 2020: Ln'(7) = 67412.0526330918
+Sat Feb  1 00:18:32 2020: Ln'(8) = 53707.6671454012
+Sat Feb  1 00:18:32 2020: Ln'(9) = 50181.4281851947
+Sat Feb  1 00:18:32 2020: |Ln''(K=2)| = 1079957.16744232
+Sat Feb  1 00:18:32 2020: |Ln''(K=3)| = 55544.8081588671
+Sat Feb  1 00:18:32 2020: |Ln''(K=4)| = 122951.860517517
+Sat Feb  1 00:18:32 2020: |Ln''(K=5)| = 5616.24032568932
+Sat Feb  1 00:18:32 2020: |Ln''(K=6)| = 38418.5858162194
+Sat Feb  1 00:18:32 2020: |Ln''(K=7)| = 13704.3854876906
+Sat Feb  1 00:18:32 2020: |Ln''(K=8)| = 3526.23896020651
+Sat Feb  1 00:18:32 2020: Delta(K=2) = 2778464.64475042
+Sat Feb  1 00:18:32 2020: Delta(K=3) = 1.030809647125
+Sat Feb  1 00:18:32 2020: Delta(K=4) = 393.424488292863
+Sat Feb  1 00:18:32 2020: Delta(K=5) = 0.633078929695997
+Sat Feb  1 00:18:32 2020: Delta(K=6) = 2.41598080185097
+Sat Feb  1 00:18:32 2020: Delta(K=7) = 1.27610584243032
+Sat Feb  1 00:18:32 2020: Delta(K=8) = 0.35037178437724
+Sat Feb  1 00:18:32 2020: Max Delta K: 2778464.64475042
+Sat Feb  1 00:18:32 2020: Optimal K by Evanno is: 2
+Sat Feb  1 00:18:32 2020: Using median values of Ln Prob of Data to calculate Prob(K=k):
+Sat Feb  1 00:18:32 2020: Prob(K=1) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=2) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=3) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=4) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=5) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=6) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=7) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=8) = 0
+Sat Feb  1 00:18:32 2020: Prob(K=9) = 1
+Sat Feb  1 00:18:32 2020: Max Probability: 1
+Sat Feb  1 00:18:32 2020: The k for which Prob(K=k) obtains the highest value is: 9
+Sat Feb  1 00:18:32 2020: Creating job zip file

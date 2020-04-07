@@ -1,0 +1,20 @@
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+Model	Replicate	log-likelihood	AIC	chi-squared	theta	optimized_params(nu1, nu2, m12, m21, m12i, m21i, T1, T2, P , p_misid)
+1	Round_1_Replicate_1	-2675.47	5370.94	645.04	445.14	0.405,3.0701,1.7748,0.6586,6.8822,0.994,1.7433,0.1731,0.5992,0.0001
+1	Round_1_Replicate_1	-2682.24	5384.48	2046.48	327.17	0.553,4.1323,0.9673,1.0987,4.375,0.4489,2.8484,0.2532,0.6751,0.0001
+1	Round_1_Replicate_1	-2673.71	5367.42	649.3	350.49	0.5436,3.888,1.0458,0.2733,4.2725,0.8108,2.4256,0.2529,0.708,0.0001
+1	Round_1_Replicate_1	-2670.48	5360.96	633.2	390.85	0.4582,3.5315,1.6357,0.3366,5.8814,1.053,2.0803,0.2014,0.6005,0.0001
+1	Round_1_Replicate_1	-2670.85	5361.7	700.41	189.39	0.9177,7.0249,1.0513,0.2091,20.0,1.2888,5.5832,0.7941,0.1627,0.0009
+1	Round_1_Replicate_1	-2671.91	5363.82	697.3	159.11	1.0323,8.4034,0.9282,0.163,19.9999,0.7747,6.9616,0.968,0.1614,0.0001
+1	Round_1_Replicate_1	-2671.17	5362.34	737.13	212.36	0.8663,6.244,1.1535,0.2546,19.9968,1.2236,4.8214,0.704,0.1501,0.0001
+1	Round_1_Replicate_1	-2670.51	5361.02	633.05	384.7	0.4644,3.5867,1.5983,0.333,5.7651,1.0019,2.13,0.2074,0.6026,0.0001
+1	Round_1_Replicate_1	-2669.07	5358.14	692.37	234.85	0.7228,5.7892,1.3759,0.2668,20.0,0.4097,4.3221,0.5649,0.1787,0.0001
+1	Round_1_Replicate_1	-2675.51	5371.02	675.27	209.59	0.7685,6.5636,1.1649,0.2048,10.9264,0.109,5.0488,0.656,0.2617,0.0003

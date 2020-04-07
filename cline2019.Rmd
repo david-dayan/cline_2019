@@ -17,6 +17,9 @@ require(dplyr)
 require(plotly)
 require(stringr)
 require(psych)
+require(ggpubr)
+require(cowplot)
+require(viridis)
 
 ```
 
@@ -1350,6 +1353,7 @@ Q scores and global depth:
 ## barplot q-scores
 qs <- read.table(file = "./snp_calling/ANGSD_outputs/qc_check/ALL.qc.qs", head=T, stringsAsFactors=F)
 barplot(height=qs$counts, names.arg=qs$qscore, xlab="Q-score", ylab="Counts", main = "Q-score distribution")
+ggplot()+geom_histogram(data = qs, aes(qscore, counts), stat = "identity")
 ```
 
  
@@ -1708,7 +1712,9 @@ grep -v -f ./snp_calling/QC/bad_inds.txt ./snp_calling/ANGSD_outputs/ALL.bamlist
 
 ```
 
-This removed all grandis, 72 individuals with too few reads and 1 individual labeled as GA but actually grandis, leaving a final dataset of 1371 individuals.
+This removed all grandis, 72 individuals with too few reads, 2 individuals with ambiguous population codes, and 1 individual labeled as GA but actually grandis, leaving a final dataset of 1371 individuals.
+
+
 
 Make genotype likelihood estimation v1.2
 ```{bash, eval = FALSE}
@@ -1859,7 +1865,7 @@ pc_inds$pop<-gsub("_\\d+", "", fish_names)
 #strategy-using regex, replace all NBH pops (F, P Syc H) in the pc_inds file with NBH
 #also clean up the names (Mg and MG)
 
-pc_inds$pop <-recode(pc_inds$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG")
+pc_inds$pop <-recode(pc_inds$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG", Hb = "HB")
 
 # write.table(pc_inds, file = "./pcangsd/pca.txt", quote = FALSE) #commented to avoid overwriting, run if doing first run through analysis
 
@@ -1869,19 +1875,102 @@ sites$Abbreviation <- recode(sites$Abbreviation, 'NBH, F, H, P, Syc' = "NBH")
 pc_inds <- merge(pc_inds, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
 
 #plot
-ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+#ggplot(data = pc_inds) + geom_point(aes(x = PC1, y = PC2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))#+stat_ellipse(aes(x = PC1, y = PC2, group = pop),type = "norm")
+
+# oops it looks like prcomp is expecting the obervations, not the covariance matrix, here we actually conducted an eigenvector decomp of a covariance matrix using eigen - this will yield the correct eignvectors and variances
+tmp <- eigen(cov_mat)
+tmp_df <- as.data.frame(tmp$vectors)
+row.names(tmp_df)<-fish_names
+tmp_df$pop<-gsub("_\\d+", "", fish_names)
+tmp_df$pop <-recode(tmp_df$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG", Hb = "HB")
+
+tmp_df <- merge(tmp_df, sites[,c("Abbreviation", "Latitude")], by.x = "pop" , by.y ="Abbreviation")
+#ggplot(data = tmp_df) + geom_point(aes(x = V1, y = V2, color = Latitude))+scale_color_gradientn(colours = rainbow(5))+xlab("PC1")+ylab("PC2")+theme_classic()
+
+ggplot(data = tmp_df) + geom_point(aes(x = V1, y = V2, color = Latitude))+xlab("PC1")+ylab("PC2")+theme_classic()+scale_colour_viridis_c(option = "plasma")
+
+#how do these pcs map onto space
+#first lets reorder for easier plotting
+tmp_df %>%
+  arrange(Latitude) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = Latitude, y = V1, color = pop))+geom_smooth(aes(x = Latitude, y = V1))+ylab("PC1")+theme_classic()
+
+tmp_df %>%
+  arrange(Latitude) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = Latitude, y = V2, color = pop))+geom_smooth(aes(x = Latitude, y = V2))+ylab("PC2")+theme_classic()#
+
+tmp_df %>%
+  arrange(Latitude) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = Latitude, y = V3, color = pop))+geom_smooth(aes(x = Latitude, y = V3))+ylab("PC3")+theme_classic()#
+
+
+
+
+
 ```
 
 ```{r, fig.cap='Results Fig. 2: Principal component analysis of genetic variation, including 3rd pc. hover mouse over points for population id - population codes are as in the table "sites" under the section "data description" at top of document.', message=FALSE, warning=FALSE}
-plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
+#plot_ly(x=pc_inds$PC1, y=pc_inds$PC2, z=pc_inds$PC3, type="scatter3d", mode="markers", color=pc_inds$pop)
+plot_ly(x=tmp_df$V1, y=tmp_df$V2, z=tmp_df$V3, type="scatter3d", mode="markers", color=pc_inds$pop)
 ```
 ```{r, fig.cap="Screeplot of PCA", out.width="35%"}
-screeplot(pc2)
+ggplot(data = data.frame(tmp$values[1:10]), aes(seq_along(tmp$values[1:10]),tmp$values[1:10]))+geom_bar(stat="identity")+xlab("PC")+ylab("eigenvalue")+theme_bw()+scale_x_continuous(breaks = 1:10)
+
+total_var <-  sum(tmp$values)
+df_tmp <- data.frame(tmp$values[1:10]) 
+colnames(df_tmp) <- "eigen"
+df_tmp %>%
+  mutate(pve = eigen/total_var*100)
+```
+
+__alongshore distance__
+An issue with trying to make a spatial interpretations of the PC plots is that we do not have even sampling over space, nor is latitude a good proxy for the distance for the populations (because the coast is not a straight line). A good way to go here might be plot variation in pcs against the alonshore distances between pops, we do this by importing some results of our landscape genetics analysis (See relevant section below) here and plotting again
+
+```{r, cache = TRUE}
+popdists <- read_tsv("./environmental/distances.txt")
+tmp_df <- tmp_df %>%
+  left_join(popdists, by ="pop")
+
+pca1 <- ggplot(data = tmp_df) + geom_point(aes(x = V1, y = V2, color = dist))+xlab("PC1")+ylab("PC2")+theme_classic()+theme(legend.position = c(0.9, 0.8))+labs(color = "Alongshore\nDistance (km)")+scale_color_viridis_c(option = "plasma")
+pca1
+
+pca2 <- ggplot(data = tmp_df) + geom_point(aes(x = V1, y = V3, color = dist))+xlab("PC1")+ylab("PC3")+theme_classic()+theme(legend.position = c(0.9, 0.8))+labs(color = "Alongshore\nDistance (km)")+scale_color_viridis_c(option = "plasma")
+pca1
+pca2
+
+#how do these pcs map onto space
+#first lets reorder for easier plotting
+space1 <- tmp_df %>%
+  arrange(dist) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = dist, y = V1, color = pop))+geom_smooth(aes(x = dist, y = V1))+ylab("PC1")+theme_classic()+geom_vline(xintercept=1400)+theme(legend.spacing = unit(.1, "char"))
+space1
+
+space2 <- tmp_df %>%
+  arrange(dist) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = dist, y = V2, color = pop))+geom_smooth(aes(x = dist, y = V2))+ylab("PC2")+theme_classic()#
+space2
+
+space3 <- tmp_df %>%
+  arrange(dist) %>%    
+  mutate(pop=factor(pop, levels=unique(pop))) %>% 
+  ggplot()+geom_point(aes(x = dist, y = V3, color = pop))+geom_smooth(aes(x = dist, y = V3))+ylab("PC3")+theme_classic()#
+space3
+
+#print these
+# pca_supple_dists <- ggarrange( space1, space2, space3,
+#                     labels = c("a", "b", "c"),
+#                     ncol = 2, nrow = 2, common.legend = TRUE, legend = "right")
+# pca_supple_dists
 ```
 
 
 __PCA Summary__  
-The final PCA corroborates previous descriptions of the _F heteroclitus_ population genetic cluster. There is a break centered at Northern New Jersey between two distinct clusters, within each cluster a pattern of isolation by distance dominates the structure.
+The final PCA corroborates previous descriptions of the _F heteroclitus_ population genetic cluster. There is a break centered at Northern New Jersey between two distinct clusters captured by the first PC, within each cluster a pattern of isolation by distance dominates the structure with the first and second pc capturing this variaiton within the southern populations and the third pc capturing this variation within the northern populations. The first three PCs describe 3.9, 2.0 and 0.5% of the total variance respectively.
 
 ### Admixture
 
@@ -1967,42 +2056,79 @@ plot_data$pop <- recode(plot_data$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "N
 
 ggplot(plot_data, aes(id, prob, fill = cluster)) +
   geom_col() +
-  facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.1, "lines"), axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position = "none")
+  facet_grid(~pop, scales = 'free', space = 'free')+ theme(panel.spacing=unit(0.1, "lines"), axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), legend.position = "none", axis.title.y=element_blank(), strip.background = element_rect(color = "white", fill = "white")) +
+  scale_fill_manual(values = c("#47039FFF", "#FDC926FF" ))
+
+#for ms plot grab just the first 30 from each population
+#sample id per group
+sample_list <- plot_data %>%
+  distinct(sample, .keep_all = TRUE) %>%
+  group_by(pop) %>%
+  sample_n(20) %>%
+  pull(sample)
+#extract rows with these ids
+#plot
+
+plot_data_sampled <- plot_data %>%
+  filter(sample %in% sample_list)
+
+
+ggplot(plot_data_sampled, aes(id, prob, fill = cluster)) +
+  geom_col(width=1.0) +
+  facet_grid(~pop, scales = 'free', space = 'free', switch = "x") +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_discrete(expand = expand_scale(add = 1)) +
+  theme(panel.spacing=unit(0.1, "lines"), axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), legend.position = "none", axis.title.y=element_blank(), strip.background = element_rect(color = "white", fill = "white")) +
+  scale_fill_manual(values = c("#47039FFF", "#FDC926FF" ))
+
+
+#these colors are selected from the viridis-magma pallette
+
 ```
+
+First admixture plot above is for the full dataset, lower plot is 30 randomly slected individuals from each.
+
 
 Data also formatted for clumpak visualization below
 ```{bash, eval = FALSE}
 
-(for log in `ls *.log`; do grep -Po 'like=\K[^ ]+' $log; done) > logfile
+(for log in `ls *.log`; do grep -Po 'like=\K[^ ]+' $log; done) > logfile_k1_9
 
 ```
 ```{r, eval = FALSE}
 
-logs <- as.data.frame(read.table("./ngs_admix/logfile_likelihoods.txt"))
+logs <- as.data.frame(read.table("./ngs_admix/raw_k1_9_likes.txt"))
 logs$K <- c(rep("1", 10), rep("2", 
-    10), rep("3", 10), rep("4", 10), rep("5", 10), rep("6", 10))
+    10), rep("3", 10), rep("4", 10), rep("5", 10), rep("6", 10), rep("7", 10), rep("8", 10), rep("9", 10))
 colnames(logs)[1] <- "likelihood"
-write.table(logs[, c(2, 1)], "/ngs_admix/logfile_likelihood_formatted.txt", row.names = F, 
-    col.names = F, quote = F)
+write.table(logs[, c(2, 1)], file = "./ngs_admix/k_1_9_logfile_likelihood_formatted.txt", row.names = F, col.names = F, quote = F)
 ```
 
-Note - delta K method suggest best K is 2, but prob(k) is maximixed at k = 6, suggesting runs of further K may be neccessary.
+Note - delta K method suggest best K is 2, but prob(k) is maximixed at k = 9, suggesting runs of further K may be neccessary.
 
 __Admixture Levels__
 
-
+Summary tables of admixture levels
 ```{r}
 plot_data %>%
   filter(cluster == "V1") %>%
-  filter(assingment_prob > 0.9) %>%
   group_by(pop) %>%
-  summarize(mean_s_cluster = mean(assingment_prob), sd = sd(assingment_prob), n = n())
+  summarize(mean_s_cluster = mean(assingment_prob), sd = sd(assingment_prob), min = min(assingment_prob), max = max(assingment_prob), n = n())
 
-plot_data %>%
-  filter(cluster == "V1") %>%
-  filter(assingment_prob > 0.9) %>%
-  select(sample) %>%
-  write_tsv("./ngs_admix/non-admixed_inds.txt", col_names = FALSE, )
+
+#filtered
+#plot_data %>%
+#  filter(cluster == "V1") %>%
+#  filter(assingment_prob > 0.9) %>%
+#  group_by(pop) %>%
+#  summarize(mean_s_cluster = mean(assingment_prob), sd = sd(assingment_prob), min = min(assingment_prob), max = max(assingment_prob), n = n())
+
+# write out to file
+# plot_data %>%
+#  filter(cluster == "V1") %>%
+#  filter(assingment_prob > 0.9) %>%
+#  select(sample) %>%
+#  write_tsv("./ngs_admix/non-admixed_inds.txt", col_names = FALSE, )
 ```
 
 Sample names of Individuals with admixture portions > 90% are written to a file for use later. 
@@ -2058,10 +2184,45 @@ path <- lc.dist(trans, sites[,c(3,2)], res = "path")
 
 ```
 
-```{r}
-plot(atlantic, image = TRUE, land = TRUE, lwd = 0.03, bpal = list(c(0, max(atlantic), greys),c(min(atlantic), 0, blues)))
-points(sites[,c(3,2)], pch = 21, col = "blue", bg = col2alpha("blue", .9),cex = 1.2)
-lapply(path, lines, col = "orange", lwd = 2, lty = 1)->dummy
+```{r, cache = TRUE, warning=FALSE, }
+require(SDMTools)
+atlantic2 <- getNOAA.bathy(lon1 = -83, lon2 = -65, lat1 = 28, lat2 = 46, resolution = 4)
+# plot(atlantic2, image = TRUE, land = TRUE, lwd = 0.03, bpal = list(c(0, max(atlantic2), greys),c(min(atlantic2), 0, blues)), xlim = c(-83, -65), ylim = c(28,48))
+
+#get colors for points
+env_table <- read.table("./environmental/temp_summary.txt", sep = "\t", header = T)
+
+number_vector <- sort(env_table$mean_annual_max)
+
+map_viridis2 <- function(vec, num) {
+  
+  min_vec <- min(vec)- 0.1
+  max_vec <- max(vec)
+  range_val <- max_vec - min_vec
+  val <- (num + 0.001 - min_vec)/range_val
+
+  colour_vector <- viridis(n=1000, option = "plasma" ) # get vector of colour values for all possible decimals between min and max value
+  value_to_colour <- colour_vector[val*1000] # retrieve colour value for number
+
+  return(value_to_colour)
+}
+
+
+map_data <- env_table %>%
+  left_join(sites, by = "pop") %>%
+  mutate(color = map_viridis2(number_vector, mean_annual_max))
+
+
+# points(map_data[,c(7,6)], pch = 20, col = map_data$color, cex = 2.0 )
+
+
+#lapply(path, lines, col = "blue", lwd = 2, lty = 1)->dummy
+
+
+## theres a ggplot extension to marmap now!!!
+# autoplot(atlantic2, geom=c("r")) + scale_fill_gradient2(low = "dodgerblue4", mid = "white", high = "khaki2")+geom_point(data= map_data, aes(lon, lat, color = mean_annual_max))+scale_color_viridis(option = "plasma")
+
+autoplot(atlantic2, geom=c("r")) + scale_fill_gradientn(values = scales::rescale(c(-6600, -10, 1, 2000)), colors = c("steelblue4", "#C7E0FF", "grey50", "grey80"))+geom_point(data= map_data, aes(lon, lat, color = mean_annual_max), size = 4)+scale_color_viridis(option = "plasma")+xlab("Longitude") +ylab("Latitude")+guides(fill=FALSE)+labs(color = "")+theme(legend.position = c(0.9, 0.2), legend.background = element_rect(fill = "transparent"))+annotate(geom = "text", x = -69, y = 31.2, label = "Mean Annual\nMaximum Temperature", angle= 90)
 ```
 
 
@@ -2086,6 +2247,15 @@ distance_matrix <- lc.dist(trans, ind_sites[,c(4,3)], res = "dist")
 
 #calculate dbmem and plot
 dbmem_pos<-dbmem(distance_matrix, MEM.autocor = "positive")
+
+#also capture the distance matrix among sites for later use
+#require(usedist)
+#require(reshape2)
+#pop_dist <- lc.dist(trans, sites[,c(3,2)], res = "dist")
+#pop_dist2 <- dist_setNames(pop_dist, sites$pop)
+#pairwise_dist <- subset(melt(as.matrix(pop_dist2)), value != 0)
+#write.table(pairwise_dist, "./environmental/pairwise_distances.txt", sep ="\t", row.names = FALSE, quote = FALSE)
+
 ```
 
 ```{r fig.cap="Figure Caption: Plot of db-mems I values"}
@@ -2189,12 +2359,17 @@ rda_axis$p.adj <- p.adjust (rda_axis$`Pr(>F)`, method = 'holm')
 #testing significance of explanatory variables by margin (each conditioned on all the others)
 rda_expl <-  anova.cca(rda_final, by = 'margin', parallel = 3)
 rda_expl$p.adj <- p.adjust (rda_expl$`Pr(>F)`, method = 'holm')
+rda_expl$pve<- rda_expl$Variance/sum(rda_expl$Variance)
+
 
 #variance partitioning
 vp <- varpart(snp_pcs , ex_var[,c(9,10)] , ex_var[,c(1:8)])
 
 #controlling for spatial autocor
-rda_ind_con_spatial<-rda(snp_pcs ~ as.matrix(env[,c(2)]) + Condition((as.matrix(dbmem_pos)[,c(1:8)])))
+#rda_ind_con_spatial<-rda(snp_pcs ~ as.matrix(env[,c(2)]) + Condition((as.matrix(dbmem_pos)[,c(1:8)])))
+rda_ind_con_spatial<-rda(snp_pcs ~  mean_annual_max + mean_annual_min + Condition(MEM1 + MEM2 + MEM3 + MEM4 + MEM5 + MEM6 + MEM7+ MEM8), data = ex_var)
+
+
 
 #controlling for temp
 rda_ind_con_temp<-rda(snp_pcs ~ Condition(as.matrix(env[,c(2)])) + (as.matrix(dbmem_pos)[,c(1:8)]))
@@ -2204,7 +2379,7 @@ aov_global <- anova(rda_final)
 aov_con_spatial <- anova(rda_ind_con_spatial) 
 aov_con_temp <- anova(rda_ind_con_temp)
 
-
+rda_expl
 ```
 
 
@@ -2229,13 +2404,16 @@ __RDA figures and results tables__
 rda_sum<-summary(rda_full, axes = c(6))
 scores <- as.data.frame(rda_sum$sites)
 scores$pop<-pops$pop
-scores$pop <- factor( as.character(scores$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "CT", "SR", "BP", "HB",  "NBH", "P", "SLC", "ME", "MDIBL")  )
+scores$pop <-recode(scores$pop, F = "NBH", P = "NBH", H = "NBH", Syc = "NBH", Mg = "MG", Hb = "HB")
+scores$pop <- factor( as.character(scores$pop), levels=c("GA", "SC", "WNC", "NC", "KC", "SH", "RB", "OC", "MG", "CT", "SR", "BP", "HB", "M", "NBH", "SLC", "ME", "MDIBL")  )
 
 #species scores
 arrows<-as.data.frame(rda_sum$biplot)
 
 #plot
-ggplot()+geom_point(aes(RDA1, RDA2, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), color="red")+geom_text(data=arrows, aes(x=RDA1+RDA1*0.2, y=RDA2+RDA2*0.2, label=c("MEM1", "MEM2","MEM3","MEM4","MEM5", "MEM6","MEM7", "MEM8", "MaxTemp", "MinTemp")), size = 4,  color="red")+theme_bw()+xlab("Redundant Axis 1 - 58%")+ylab("Redundant Axis 1 - 17%")
+ggplot()+geom_point(aes(RDA1, RDA2, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), color="red")+geom_text(data=arrows, aes(x=RDA1+RDA1*0.3, y=RDA2+RDA2*0.3, label=c("MEM1", "MEM2","MEM3","MEM4","MEM5", "MEM6","MEM7", "MEM8", "MaxTemp", "MinTemp")), size = 4,  color="red")+theme_classic()+xlab("Redundant Axis 1 - 58%")+ylab("Redundant Axis 2 - 17%")+scale_color_viridis_d(option = "plasma")
+
+ggplot()+geom_point(aes(RDA1, RDA3, color = pop), data = scores)+geom_segment(data=arrows, aes(x=0, y=0, xend=RDA1, yend=RDA2), arrow=arrow(length=unit(0.2,"cm")), color="red")+geom_text(data=arrows, aes(x=RDA1, y=RDA3, label=c("MEM1", "MEM2","MEM3","MEM4","MEM5", "MEM6","MEM7", "MEM8", "MaxTemp", "MinTemp")), size = 4,  color="red")+theme_classic()+xlab("Redundant Axis 1 - 58%")+ylab("Redundant Axis 3 - 17%")+scale_color_viridis_d(option = "plasma")
 ```
 
 ```{r, fig.cap="Screeplot of RDA - red is constrained axes, black is unconstrained axes"}
@@ -2251,71 +2429,31 @@ __minor notes for deeper analysis if wanted__
 * cRDA (RDA on the components of genetic variation) seems to be less powerful at identifying adaptive loci, largely because these loci can load into pcs, could do a locus by locus RDA, but this would present its own challenges - somehting to consider
 
 
-
-
-
-
-
-
-
 ## SFS
 
-Work using the SFS is contained in a seaprate R notebook, all code below is draft for future work
+All work that begins with the SFS is in a separate R notebook (cline_2019_SFS)
 
-__SFS Analysis Outline__  
-* Make consensus sequence from grandis reads to polarize the SAF - doFasta -2  
-* estimate SAFs for each population and metapopulation  -doSAF
-* estimate per population SFS  
-* estimate 2dSFS for each pair of populations  
-* 1d and 2dSFS used in downstream analyses: per-site summary statistics, global Fst, and dadi  
+## LD
 
-questions: 
-*is it possible to estimate SAF without re-estimating GLs (we already have them)
-*what filtering is neccesarry for the population and 2d sfs, when there are so few indiviudals a maf of 1% becomes unmeaningful, should we filter to a higher MAF or at least, increase min number of individuals for a site to be retained (i.e. saf estimate is likely to be very very bad if there are sites with 2 individuals)
-*how should we pool sampling locales into metapopulations (i.e. it's clear that all the NBH populations should be combined into a single pop, but what about all NJ populations or all ME populations) - what spatial or genetic scale should be the cutoff for pooling populations
+__note_: we did not run ngsLD instead relied on previous estimates of LD, this section is left in the document in case we want to install and run it later
+
+__Rationale:__  
 
 
-### 1d SFS estimation
+In this section we (1) produce ld-pruned datsets for downstream analyses sensitive to the effects of linkage, and (2) examine the rate LD decays along the genome. A package (ngsLD) can calculate LD based on genotype likelihoods and correctly incorporate uncertainty.
 
-__ancestral sequence__
-
-Polarize SAF by an outgroup (f grandis)
-use doFasta -2 with -doCounts 1 and the same filters as $FILTERS from the GL run
-
+__Installing ngsLD__
 ```{bash, eval = FALSE}
-
-#!/bin/bash
-
-# set max wall-clock time (D-HH:MM:SS)
-#SBATCH --time=6-23:59:00
-
-#SBATCH --cpus-per-task=38
-
-# set partition/queue to use
-#SBATCH --partition=week-long-cpu
-
-# set name of job
-#SBATCH --job-name=consensus
-
-# set name of output file
-#SBATCH --output=consensus.out
-
-
-ANGSD="/opt/angsd0.928/angsd/angsd"
-REF="/home/ddayan/fundulus/genome/f_het_genome_3.0.2.fa.gz"
-
-FILTERS="-uniqueOnly 1 -remove_bads 1 -trim 0 -C 50 -baq 1 -minMapQ 20"
-DOS="-doFasta 2 -doCounts 1 -dumpCounts 2" 
-
-$ANGSD -P 38 -b ../meta_data/grandis.bams -ref $REF -out ./Results/grandis_consensus.fa \
-  $FILTERS $DOS \
+#clone repo
+git clone https://github.com/fgvieira/ngsLD.git
+#create virtual env
+virtualenv ./
+#activate
+source ./bin/activate
+#install
+configure --prefix=/home/local/zlib 
 ```
 
 
-__SAF 1 big population__
 
-### 2d SFS
 
-### global FST   
-
-### Per site summary stats  

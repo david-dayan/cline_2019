@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# set max wall-clock time (D-HH:MM:SS)
+#SBATCH --time=0-23:59:00
+
+#SBATCH --cpus-per-task=1
+
+# set partition/queue to use
+#SBATCH --partition=day-long-cpu
+
+# set name of job
+#SBATCH --job-name=boots
+
+# set name of output file
+#SBATCH --output=boot.out
+
+
+source /home/ddayan/software/demography/env/bin/activate
+python /home/ddayan/fundulus/moments_data/boots/bootstraps.py
